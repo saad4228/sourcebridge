@@ -99,6 +99,20 @@ describe('PPTX export', () => {
     expect(slide3).toContain('Limitations');
   });
 
+  it('keeps the suggested-visual note off the slide and in the notes', async () => {
+    const bytes = await renderPresentationPptx(deck);
+    const zip = await JSZip.loadAsync(bytes);
+
+    // It is a production recommendation for whoever finishes the deck, not
+    // content for the audience. Printed on the slide it just looked unfinished.
+    const slide2 = await zip.file('ppt/slides/slide2.xml')!.async('string');
+    expect(slide2).not.toContain('Suggested visual');
+
+    // notesSlide1 belongs to the title slide, which carries no notes.
+    const notes2 = await zip.file('ppt/notesSlides/notesSlide2.xml')!.async('string');
+    expect(notes2).toContain('Suggested visual: chart');
+  });
+
   it('includes speaker notes and evidence IDs', async () => {
     const bytes = await renderPresentationPptx(deck);
     const zip = await JSZip.loadAsync(bytes);
