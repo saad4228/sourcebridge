@@ -16,7 +16,7 @@ import { OutputPanel } from './OutputPanel';
 import { FactLedgerPanel } from './FactLedgerPanel';
 import { EvidenceDrawer } from './EvidenceDrawer';
 import { ThemeToggle } from './ThemeToggle';
-import { BRAND_MARK } from './brandMark';
+import { BRAND_MARK, BRAND_MARK_RATIO } from './brandMark';
 import { Badge, Button, Callout, Panel, Spinner, cx } from './ui';
 import {
   analyzeSource,
@@ -287,16 +287,24 @@ export function Workspace() {
             type="button"
             onClick={handleGoHome}
             aria-label="SourceBridge — return to the start"
-            className="flex items-center gap-2 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-[var(--color-surface-sunken)]"
+            className="flex items-center gap-2.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-[var(--color-surface-sunken)]"
           >
-            {/* eslint-disable-next-line @next/next/no-img-element -- an inlined
-                data URI: there is no request for next/image to optimise. */}
-            <img src={BRAND_MARK} alt="" width={28} height={28} className="h-7 w-7 rounded-md" />
+            {/* An inlined data URI, sized by height so the width follows the
+                artwork's own proportions and the mark is never stretched.
+                There is no request here for next/image to optimise. */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={BRAND_MARK}
+              alt=""
+              height={40}
+              width={Math.round(40 * BRAND_MARK_RATIO)}
+              className="h-10 w-auto"
+            />
             <span>
-              <span className="block text-sm font-semibold leading-tight text-[var(--color-ink)]">
+              <span className="block text-lg font-semibold leading-tight tracking-tight text-[var(--color-ink)]">
                 SourceBridge
               </span>
-              <span className="block text-[10px] leading-tight text-[var(--color-ink-faint)]">
+              <span className="block text-[11px] leading-tight text-[var(--color-ink-faint)]">
                 One source. Multiple formats. Traceable facts.
               </span>
             </span>

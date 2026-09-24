@@ -158,6 +158,7 @@ node scripts/theme-check.mjs <dir>          # capture both themes in a browser
 node scripts/render-deck.mjs <out.pptx>     # export a deck covering every slide layout
 node scripts/render-infographics.mjs <dir>  # render all four infographic layouts
 node scripts/render-video.mjs <out.mp4>     # render a video package to MP4 (uses TTS quota)
+node scripts/build-brand-mark.mjs <x0> <y0> <x1> <y1>   # regenerate icons after changing public/icon.png
 powershell -File scripts/pptx-to-png.ps1 <in.pptx> <dir>   # open a .pptx in PowerPoint, export PNGs
 ```
 
