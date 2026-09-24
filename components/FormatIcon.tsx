@@ -16,10 +16,26 @@
 import type { FormatId } from '@/lib/types';
 import { cx } from './ui';
 
-/** Brand colours, used only when the icon is shown in colour. */
+/**
+ * Brand colours, used only when the icon is shown in colour.
+ *
+ * The five formats with no platform borrow the colour of the application their
+ * export opens in, so the row reads as a set of real destinations rather than a
+ * row of accent-coloured glyphs.
+ */
 const BRAND = {
   linkedin: '#0A66C2',
   x: '#000000',
+  /** PowerPoint, which opens the .pptx export. */
+  powerpoint: '#C43E1C',
+  /** Word, the closest match for a written document. */
+  word: '#185ABD',
+  /** Acrobat red, the convention for a formal notice. */
+  advisory: '#B30B00',
+  /** Excel green, the convention for charts and figures. */
+  chart: '#107C41',
+  /** Media red, the convention for video. */
+  video: '#FF0000',
 } as const;
 
 export function FormatIcon({
@@ -55,70 +71,78 @@ export function FormatIcon({
         </svg>
       );
 
-    // --- Formats with no platform: drawn marks -----------------------------
+    // --- Formats with no single platform -----------------------------------
+    // Drawn in the style and colour of the application each export opens in, so
+    // the set reads consistently beside the LinkedIn and X marks.
 
-    case 'exec_summary':
-      // A document with a highlighted first line: the finding leads.
+    case 'exec_summary': {
+      // A document page, in Word blue: the export is a written brief.
+      const fill = brandColour ? BRAND.word : 'currentColor';
       return (
         <svg viewBox="0 0 24 24" className={common} aria-hidden="true" role="img">
+          <path fill={fill} d="M14 2H5.5A1.5 1.5 0 0 0 4 3.5v17A1.5 1.5 0 0 0 5.5 22h13a1.5 1.5 0 0 0 1.5-1.5V8z" opacity="0.28" />
+          <path fill={fill} d="M14 2l6 6h-4.5A1.5 1.5 0 0 1 14 6.5z" />
           <path
-            fill="currentColor"
-            d="M5 2h9l5 5v15a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1m8.5 1.75V7.5H17z"
-            opacity="0.25"
-          />
-          <path
-            fill="currentColor"
-            d="M7 10.5h6.5a.75.75 0 0 1 0 1.5H7a.75.75 0 0 1 0-1.5m0 3.5h10a.75.75 0 0 1 0 1.5H7a.75.75 0 0 1 0-1.5m0 3.5h10a.75.75 0 0 1 0 1.5H7a.75.75 0 0 1 0-1.5"
+            fill={fill}
+            d="M7.6 11h1.3l.9 4.1.9-4.1h1.2l.9 4.1.9-4.1h1.3l-1.5 6.2h-1.3l-.9-3.9-.9 3.9H9.1z"
           />
         </svg>
       );
+    }
 
-    case 'advisory':
-      // A shield: a formal notice carrying a caution.
+    case 'advisory': {
+      // A notice sheet with a warning mark, in the red used for advisories.
+      const fill = brandColour ? BRAND.advisory : 'currentColor';
       return (
         <svg viewBox="0 0 24 24" className={common} aria-hidden="true" role="img">
-          <path fill="currentColor" d="M12 1.5 3.5 5v6.6c0 5.2 3.6 10 8.5 11.4 4.9-1.4 8.5-6.2 8.5-11.4V5z" opacity="0.25" />
+          <path fill={fill} d="M14 2H5.5A1.5 1.5 0 0 0 4 3.5v17A1.5 1.5 0 0 0 5.5 22h13a1.5 1.5 0 0 0 1.5-1.5V8z" opacity="0.28" />
+          <path fill={fill} d="M14 2l6 6h-4.5A1.5 1.5 0 0 1 14 6.5z" />
           <path
-            fill="currentColor"
-            d="M12 7a1 1 0 0 1 1 1v4.5a1 1 0 1 1-2 0V8a1 1 0 0 1 1-1m0 8.5a1.15 1.15 0 1 1 0 2.3 1.15 1.15 0 0 1 0-2.3"
+            fill={fill}
+            d="M12 10.4a.95.95 0 0 1 .95.95v3.4a.95.95 0 1 1-1.9 0v-3.4a.95.95 0 0 1 .95-.95m0 6.1a1.1 1.1 0 1 1 0 2.2 1.1 1.1 0 0 1 0-2.2"
           />
         </svg>
       );
+    }
 
-    case 'presentation':
-      // A screen on a stand.
+    case 'presentation': {
+      // A slide on a stand, in PowerPoint orange-red.
+      const fill = brandColour ? BRAND.powerpoint : 'currentColor';
       return (
         <svg viewBox="0 0 24 24" className={common} aria-hidden="true" role="img">
-          <path fill="currentColor" d="M2.5 3h19a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1h-19a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1" opacity="0.25" />
+          <rect x="2" y="3" width="20" height="13" rx="1.5" fill={fill} opacity="0.28" />
+          <path fill={fill} d="M11 16h2v2.6l3.5 2.6a1 1 0 0 1-1.2 1.6L12 20.4l-3.3 2.4a1 1 0 0 1-1.2-1.6L11 18.6z" />
           <path
-            fill="currentColor"
-            d="M11 15h2v2.9l3.4 3a1 1 0 1 1-1.3 1.5L12 19.7l-3.1 2.7a1 1 0 0 1-1.3-1.5l3.4-3zM6 8.5a.9.9 0 0 1 .9.9v2.2a.9.9 0 1 1-1.8 0V9.4a.9.9 0 0 1 .9-.9m4-3a.9.9 0 0 1 .9.9v5.2a.9.9 0 1 1-1.8 0V6.4a.9.9 0 0 1 .9-.9m4 1.6a.9.9 0 0 1 .9.9v3.6a.9.9 0 1 1-1.8 0V8a.9.9 0 0 1 .9-.9"
+            fill={fill}
+            d="M8.6 5.8h3a2.7 2.7 0 0 1 0 5.4h-1.4v2.2H8.6zm1.6 1.5v2.4h1.3a1.2 1.2 0 0 0 0-2.4z"
           />
         </svg>
       );
+    }
 
-    case 'infographic':
-      // Bars of differing height: figures made visual.
+    case 'infographic': {
+      // A chart sheet, in the green conventionally used for figures.
+      const fill = brandColour ? BRAND.chart : 'currentColor';
       return (
         <svg viewBox="0 0 24 24" className={common} aria-hidden="true" role="img">
-          <path fill="currentColor" d="M3 2h18a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1" opacity="0.18" />
+          <rect x="2.5" y="2.5" width="19" height="19" rx="2" fill={fill} opacity="0.24" />
           <path
-            fill="currentColor"
-            d="M6.5 13a1 1 0 0 1 1 1v4a1 1 0 1 1-2 0v-4a1 1 0 0 1 1-1m5-7a1 1 0 0 1 1 1v11a1 1 0 1 1-2 0V7a1 1 0 0 1 1-1m5 4a1 1 0 0 1 1 1v7a1 1 0 1 1-2 0v-7a1 1 0 0 1 1-1"
+            fill={fill}
+            d="M6.9 13.2a1 1 0 0 1 1 1v3.3a1 1 0 1 1-2 0v-3.3a1 1 0 0 1 1-1m4.4-7.1a1 1 0 0 1 1 1v10.4a1 1 0 1 1-2 0V7.1a1 1 0 0 1 1-1m4.4 4a1 1 0 0 1 1 1v6.4a1 1 0 1 1-2 0v-6.4a1 1 0 0 1 1-1"
           />
         </svg>
       );
+    }
 
-    case 'video_package':
-      // A clapperboard: a production package, not a finished film.
+    case 'video_package': {
+      // A play button, the universal mark for video.
+      const fill = brandColour ? BRAND.video : 'currentColor';
       return (
         <svg viewBox="0 0 24 24" className={common} aria-hidden="true" role="img">
-          <path fill="currentColor" d="M2 9h20v11a1.5 1.5 0 0 1-1.5 1.5h-17A1.5 1.5 0 0 1 2 20z" opacity="0.25" />
-          <path
-            fill="currentColor"
-            d="M3.2 2.9 21 5.6a1.2 1.2 0 0 1 1 1.4L21.8 9H2.2l-.2-1.3A1.2 1.2 0 0 1 3 6.4zM10 12.6l5 2.9-5 2.9z"
-          />
+          <rect x="1.5" y="4" width="21" height="16" rx="4" fill={fill} opacity={brandColour ? 1 : 0.28} />
+          <path fill={brandColour ? '#ffffff' : 'currentColor'} d="M10 8.4l6 3.6-6 3.6z" />
         </svg>
       );
+    }
   }
 }

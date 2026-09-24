@@ -26,6 +26,7 @@ export class ProviderError extends Error {
       | 'timeout'
       | 'invalid_output'
       | 'unavailable'
+      | 'network'
       | 'bad_model'
       | 'upstream',
     readonly retryable = false,
@@ -62,15 +63,81 @@ export function modelName(): string {
  * faster than waiting on one that is currently saturated. Override the whole
  * chain with GEMINI_FALLBACK_MODELS (comma-separated).
  */
-const DEFAULT_FALLBACKS = ['gemini-3.1-flash-lite', 'gemini-3.5-flash-lite', 'gemini-3.6-flash'];
+/**
+ * Ordered by measured reliability, not by tier.
+ *
+ * The lite models look attractive on paper but were observed refusing work for
+ * sustained periods, and — worse — occasionally accepting a request and then
+ * hanging for minutes. They are kept at the end as a last resort rather than
+ * tried first.
+ */
+const DEFAULT_FALLBACKS = [
+  'gemini-3.5-flash',
+  // Gemma draws on a separate allowance and supports structured output, so it
+  // keeps the app working after the Gemini daily quotas are spent.
+  'gemma-4-26b-a4b-it',
+  'gemma-4-31b-it',
+  'gemini-3.8-flash',
+  'gemini-flash-lite-latest',
+  'gemini-3.1-flash-lite',
+];
 
-export function modelChain(): string[] {
+/**
+ * Give up on a single request after this long and try another model.
+ *
+ * Without a deadline one slow model stalls the whole run: a model was measured
+ * taking 261 seconds to answer a trivial prompt, which is far worse than an
+ * outright refusal because nothing else can proceed meanwhile.
+ */
+const REQUEST_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS ?? 45_000);
+
+function configuredChain(): string[] {
   const configured = process.env.GEMINI_FALLBACK_MODELS?.trim();
   const fallbacks = configured
     ? configured.split(',').map((m) => m.trim()).filter(Boolean)
     : DEFAULT_FALLBACKS;
   // Primary first, then fallbacks, without repeating the primary.
   return [...new Set([modelName(), ...fallbacks])];
+}
+
+/**
+ * Models known to be refusing work, and when to reconsider them.
+ *
+ * Without this, every format independently rediscovers that the same models are
+ * down: seven formats times three dead models is twenty-one pointless requests,
+ * each waiting on a timeout. Overload is a property of the model, not of one
+ * request, so it is remembered for the whole process.
+ */
+const cooldowns = new Map<string, number>();
+
+/** How long to skip a model after it reports overload or exhausted quota. */
+const COOLDOWN_MS = { unavailable: 60_000, rate_limit: 5 * 60_000, bad_model: 60 * 60_000 } as const;
+
+function markUnavailable(model: string, code: string) {
+  const ms =
+    code === 'rate_limit'
+      ? COOLDOWN_MS.rate_limit
+      : code === 'bad_model'
+        ? COOLDOWN_MS.bad_model
+        : COOLDOWN_MS.unavailable;
+  cooldowns.set(model, Date.now() + ms);
+}
+
+function markAvailable(model: string) {
+  cooldowns.delete(model);
+}
+
+/**
+ * The chain to try, skipping models still in cooldown.
+ *
+ * If every model is cooling down the full chain is returned anyway: a stale
+ * cooldown must never leave the application with nothing to call.
+ */
+export function modelChain(): string[] {
+  const all = configuredChain();
+  const now = Date.now();
+  const live = all.filter((model) => (cooldowns.get(model) ?? 0) <= now);
+  return live.length > 0 ? live : all;
 }
 
 /**
@@ -107,10 +174,12 @@ function toProviderError(err: unknown): ProviderError {
     // A per-day quota is not a momentary spike: say so, because "retry shortly"
     // would be misleading when the allowance resets tomorrow.
     const daily = lower.includes('perday') || lower.includes('per day') || lower.includes('freetier');
+    // Say which it is: a momentary rate limit clears in seconds, a spent daily
+    // allowance does not clear today at all, and "retry shortly" would be a lie.
     return new ProviderError(
       daily
-        ? 'The free-tier daily quota for this model is used up. SourceBridge will try other models ' +
-          'automatically; if all are exhausted the allowance resets after 24 hours.'
+        ? "This model's free-tier daily allowance is spent. Other models are tried automatically; " +
+          'once every one is spent, generation resumes when the allowance resets (about 24 hours).'
         : 'The AI provider rate limit was reached. Wait a moment and retry this format.',
       'rate_limit',
       true,
@@ -134,18 +203,72 @@ function toProviderError(err: unknown): ProviderError {
       false,
     );
   }
+  if (
+    lower.includes('fetch failed') ||
+    lower.includes('econnreset') ||
+    lower.includes('enotfound') ||
+    lower.includes('socket') ||
+    lower.includes('network')
+  ) {
+    // The connection dropped rather than the model refusing: worth another go,
+    // but it says nothing about whether that model is healthy.
+    return new ProviderError(
+      'The connection to the AI provider dropped. Check your network, then retry this format.',
+      'network',
+      true,
+    );
+  }
   return new ProviderError(`AI provider error: ${message}`, 'upstream', true);
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-/** Transient overload and rate limiting are common on free tiers; ride them out. */
-const TRANSIENT_CODES = new Set(['unavailable', 'rate_limit', 'timeout']);
+/**
+ * Run one provider call under a deadline.
+ *
+ * A model that hangs is worse than one that refuses: the refusal moves us on
+ * immediately, while the hang blocks every remaining format. The abort is
+ * reported as a timeout so the caller treats it like any other transient
+ * failure and tries a different model.
+ */
+async function withDeadline<T>(
+  model: string,
+  run: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await run(controller.signal);
+  } catch (err) {
+    if (controller.signal.aborted) {
+      throw new ProviderError(
+        `${model} did not respond within ${Math.round(REQUEST_TIMEOUT_MS / 1000)} seconds.`,
+        'timeout',
+        true,
+      );
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Failures worth trying a different model for.
+ *
+ * `network` covers a dropped or refused connection, which surfaces as a bare
+ * "fetch failed". It was previously classed as permanent, so a single flaky
+ * connection failed the whole format without a retry.
+ */
+const TRANSIENT_CODES = new Set(['unavailable', 'rate_limit', 'timeout', 'network']);
 const MAX_ATTEMPTS = 6;
 
 /**
- * Invoke `fn`, retrying transient provider failures with exponential backoff.
- * Permanent failures (bad key, retired model) fail immediately.
+ * Invoke `fn`, moving to another model when one refuses work.
+ *
+ * A model that reports overload is put in cooldown, so the remaining formats in
+ * a run skip it instead of each rediscovering it. Permanent failures (a rejected
+ * key) fail immediately.
  */
 async function withRetry<T>(fn: (model: string) => Promise<T>): Promise<{ value: T; model: string }> {
   const chain = modelChain();
@@ -155,12 +278,18 @@ async function withRetry<T>(fn: (model: string) => Promise<T>): Promise<{ value:
     // Rotate through the chain, then start again from the top.
     const model = chain[attempt % chain.length];
     try {
-      return { value: await fn(model), model };
+      const value = await fn(model);
+      markAvailable(model);
+      return { value, model };
     } catch (err) {
       const error = toProviderError(err);
       // A retired model name is permanent for that model but the next one in
       // the chain may still work, so keep going unless nothing is left.
       const worthRetrying = TRANSIENT_CODES.has(error.code) || error.code === 'bad_model';
+      if (worthRetrying && error.code !== 'network') {
+        // Remember this model is refusing work, so other formats skip it.
+        markUnavailable(model, error.code);
+      }
       if (!worthRetrying || attempt === MAX_ATTEMPTS - 1) throw error;
       lastError = error;
       // Only pause once we have been round the whole chain.
@@ -207,21 +336,24 @@ export async function generateJson<T>(
   let usedModel = modelName();
 
   const call = async (prompt: string): Promise<string> => {
-    const { value, model } = await withRetry(async (candidate) => {
-      const response = await ai.models.generateContent({
-        model: candidate,
-        contents: prompt,
-        config: {
-          systemInstruction: options.system,
-          responseMimeType: 'application/json',
-          responseSchema,
-          temperature: options.temperature ?? 0.4,
-          maxOutputTokens: options.maxOutputTokens ?? 8192,
-          abortSignal: options.signal,
-        },
-      });
-      return response.text ?? '';
-    });
+    const { value, model } = await withRetry(async (candidate) =>
+      withDeadline(candidate, (signal) =>
+        ai.models
+          .generateContent({
+            model: candidate,
+            contents: prompt,
+            config: {
+              systemInstruction: options.system,
+              responseMimeType: 'application/json',
+              responseSchema,
+              temperature: options.temperature ?? 0.4,
+              maxOutputTokens: options.maxOutputTokens ?? 8192,
+              abortSignal: signal,
+            },
+          })
+          .then((response) => response.text ?? ''),
+      ),
+    );
     usedModel = model;
     return value;
   };
@@ -342,14 +474,17 @@ export async function synthesizeSpeech(text: string, voice = 'Kore'): Promise<Sp
   for (let attempt = 0; attempt < Math.max(chain.length * 2, 2); attempt++) {
     const model = chain[attempt % chain.length];
     try {
-      const response = await ai.models.generateContent({
-        model,
-        contents: spoken,
-        config: {
-          responseModalities: ['AUDIO'],
-          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
-        },
-      });
+      const response = await withDeadline(model, (signal) =>
+        ai.models.generateContent({
+          model,
+          contents: spoken,
+          config: {
+            responseModalities: ['AUDIO'],
+            speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
+            abortSignal: signal,
+          },
+        }),
+      );
 
       const inline = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
       if (!inline?.data) {
@@ -387,22 +522,29 @@ export async function transcribeMedia(
   const ai = client();
   const started = Date.now();
 
-  const { value, model } = await withRetry(async (candidate) => {
-    const response = await ai.models.generateContent({
-      model: candidate,
-      contents: [
-        {
-          parts: [
-            { inlineData: { mimeType, data: base64 } },
-            { text: MEDIA_PROMPTS[kind] },
+  const { value, model } = await withRetry(async (candidate) =>
+    withDeadline(candidate, (signal) =>
+      ai.models
+        .generateContent({
+          model: candidate,
+          contents: [
+            {
+              parts: [
+                { inlineData: { mimeType, data: base64 } },
+                { text: MEDIA_PROMPTS[kind] },
+              ],
+            },
           ],
-        },
-      ],
-      // A video transcript runs longer than an image caption.
-      config: { temperature: 0, maxOutputTokens: kind === 'video' ? 8192 : 4096 },
-    });
-    return response.text ?? '';
-  });
+          // A video transcript runs longer than an image caption.
+          config: {
+            temperature: 0,
+            maxOutputTokens: kind === 'video' ? 8192 : 4096,
+            abortSignal: signal,
+          },
+        })
+        .then((response) => response.text ?? ''),
+    ),
+  );
 
   return { text: value, model, latencyMs: Date.now() - started };
 }
