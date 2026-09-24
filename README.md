@@ -102,7 +102,7 @@ Then edit `.env.local` and add your key:
 
 ```
 GEMINI_API_KEY=your-key-here
-GEMINI_MODEL=gemini-flash-lite-latest
+GEMINI_MODEL=gemini-3.6-flash
 ```
 
 `.env.local` is gitignored. **The key is read only on the server** and is never sent to the browser.
@@ -117,9 +117,15 @@ Gemini model availability changes over time. If you see *"no longer available to
 `GEMINI_MODEL` to a current model name.
 
 Free-tier capacity also fluctuates — a model can return `503 high demand` for a minute and be fine
-the next. SourceBridge handles this automatically by rotating through a fallback chain
-(`GEMINI_FALLBACK_MODELS`, default `gemini-3.1-flash-lite,gemini-3.5-flash-lite,gemini-3.6-flash`)
-before giving up. The header badge shows which model actually answered.
+the next, or accept a request and then hang for minutes. SourceBridge handles this by rotating
+through a fallback chain (`GEMINI_FALLBACK_MODELS`) ordered by measured reliability. The chain
+includes Gemma, which draws on a separate allowance and so keeps working once the Gemini daily
+quotas are spent.
+
+Two details matter in practice: every call runs under a deadline (`GEMINI_TIMEOUT_MS`, 45s by
+default) because a hanging model stalls everything behind it, and a model that refuses work is
+skipped for a cooldown rather than retried by each format in turn. The header badge shows which
+model actually answered.
 
 ### Free-tier daily quota
 
@@ -149,7 +155,7 @@ startup.
 npm run dev         # development server
 npm run build       # production build
 npm run start       # production server (after build)
-npm test            # 141 tests, no API key required
+npm test            # 156 tests, no API key required
 npm run typecheck   # TypeScript, no emit
 npm run lint        # ESLint
 npm run smoke       # live end-to-end check against a running server (uses your API key)
@@ -203,7 +209,7 @@ citations to fill the gap.
 npm test
 ```
 
-141 tests run without an API key:
+156 tests run without an API key:
 
 - **Extraction** — page metadata, segment ID uniqueness, figures and caveats surviving extraction,
   results tables kept whole, paragraph reflow, oversized input rejected rather than truncated,
@@ -348,7 +354,7 @@ lib/
   client/         browser API helpers and workspace state
 samples/          synthetic test documents
 scripts/          smoke test, deck builder, screenshot driver
-tests/            141 tests
+tests/            156 tests
 ```
 
 ---
