@@ -40,7 +40,7 @@ Built for SIH 2026, problem statement 26154.
 | Video package `.zip` (script, storyboard, narration, SRT) | Implemented |
 | Rendered `.mp4` with spoken narration and audio-aligned subtitles | Implemented — needs ffmpeg |
 | "Download all" — every completed format in one archive | Implemented |
-| Automatic model fallback when the provider is overloaded | Implemented |
+| Two providers, with automatic fallback across every model in both | Implemented |
 | Light / dark theme with a header toggle | Implemented |
 
 ### The seven formats
@@ -88,8 +88,13 @@ Stated plainly, because the interface is not allowed to imply otherwise:
 - **Node.js 20 or newer.** Developed and tested on Node 24.18.0 / npm 11.16.0.
 - **ffmpeg (optional).** Only needed for the rendered `.mp4` export. Everything else works
   without it. Install with `winget install Gyan.FFmpeg`, or set `FFMPEG_PATH` to the binary.
-- **A Google Gemini API key.** The free tier is sufficient — no billing setup required. Get one at
-  <https://aistudio.google.com/apikey>.
+- **At least one provider key.** Both free tiers are sufficient — no billing setup required.
+  - [Groq](https://console.groq.com/keys) — used first for text, and answers in about a second.
+  - [Google Gemini](https://aistudio.google.com/apikey) — needed for reading image and video
+    sources and for video narration, which Groq does not do.
+
+  With both keys the app is fastest and fully featured. With Gemini alone everything works, more
+  slowly. With Groq alone every format generates, but image and video sources are refused.
 
 ## Installation
 
@@ -98,42 +103,62 @@ npm install
 cp .env.example .env.local
 ```
 
-Then edit `.env.local` and add your key:
+Then edit `.env.local` and add your keys:
 
 ```
+GROQ_API_KEY=your-key-here
 GEMINI_API_KEY=your-key-here
 GEMINI_MODEL=gemini-3.6-flash
 ```
 
-`.env.local` is gitignored. **The key is read only on the server** and is never sent to the browser.
+`.env.local` is gitignored. **Keys are read only on the server** and are never sent to the browser.
 
-> **Data handling:** source content you provide is sent to Google's Gemini API for processing. This
+> **Data handling:** source content you provide is sent to Groq and/or Google for processing. This
 > is not local-only processing. Do not upload material you are not permitted to share with a
 > third-party service.
 
-### About model names
+### How a model is chosen
 
-Gemini model availability changes over time. If you see *"no longer available to new users"*, set
-`GEMINI_MODEL` to a current model name.
+Text generation walks one chain: the Groq models first, then the Gemini ones. Groq leads because it
+was measured answering in about a second where the Gemini free tier took tens of seconds, and
+because its allowance is entirely separate — a spent Gemini quota no longer stops the app. Reading
+images and video, and speaking video narration, stay on Gemini, which is the only one of the two
+that does either.
 
-Free-tier capacity also fluctuates — a model can return `503 high demand` for a minute and be fine
-the next, or accept a request and then hang for minutes. SourceBridge handles this by rotating
-through a fallback chain (`GEMINI_FALLBACK_MODELS`) ordered by measured reliability. The chain
-includes Gemma, which draws on a separate allowance and so keeps working once the Gemini daily
-quotas are spent.
+Any OpenAI-compatible endpoint can take Groq's place — OpenRouter, Cerebras and GitHub Models all
+speak the same shape. Point `GROQ_BASE_URL` and `GROQ_MODELS` at one; no code changes.
 
-Two details matter in practice: every call runs under a deadline (`GEMINI_TIMEOUT_MS`, 45s by
-default) because a hanging model stalls everything behind it, and a model that refuses work is
-skipped for a cooldown rather than retried by each format in turn. The header badge shows which
-model actually answered.
+Free-tier capacity fluctuates. A model can return `503 high demand` for a minute and be fine the
+next, or accept a request and then hang for minutes, so four rules apply:
+
+- **Every call runs under a deadline** (`GEMINI_TIMEOUT_MS`, 45s). A hanging model stalls
+  everything behind it; one was measured taking 261 seconds to answer a trivial prompt.
+- **A model that refuses work is skipped for a cooldown**, process-wide, rather than being
+  rediscovered by each of the seven formats in turn.
+- **A short, stated rate limit is waited out** rather than fallen through. When the fast provider
+  says "try again in 8 seconds", doing so beats handing the work to a provider that takes minutes.
+- **A malformed reply does not count against the model.** That is a fact about one response, not
+  about the model's health.
+
+The Gemini part of the chain includes Gemma, which draws on a separate allowance again and so keeps
+working once the Gemini daily quotas are spent. If you see *"no longer available to new users"*, set
+`GEMINI_MODEL` to a current model name. The header badge shows which model actually answered.
 
 ### Free-tier daily quota
 
+The two providers meter differently, which is why using both is worth it.
+
 Gemini caps free-tier requests **per model, per day** — `gemini-3.6-flash` allows 20/day. One
 seven-format run costs about eight requests (one analysis plus one per format), so a single model
-gives roughly two runs a day. The fallback chain spreads load across several models, each with its
-own allowance. If generation starts failing with a 429 mentioning `PerDay` or `FreeTier`, the
-allowance has reset in 24 hours or another model is needed — it is not a transient spike.
+gives roughly two runs a day. A 429 mentioning `PerDay` or `FreeTier` is a spent daily allowance,
+not a transient spike: it clears when the allowance resets, about 24 hours later.
+
+Groq caps **tokens per minute** instead. That limit clears in seconds rather than a day, and the
+app waits it out when the provider states a short delay. It is also why `GROQ_REASONING_EFFORT`
+defaults to `low`: hidden reasoning tokens count against the same allowance, and low was measured
+using about half the tokens for the same output quality.
+
+Either chain spreads load across several models, each with its own allowance.
 
 ## Running locally
 
@@ -155,7 +180,7 @@ startup.
 npm run dev         # development server
 npm run build       # production build
 npm run start       # production server (after build)
-npm test            # 156 tests, no API key required
+npm test            # 184 tests, no API key required
 npm run typecheck   # TypeScript, no emit
 npm run lint        # ESLint
 npm run smoke       # live end-to-end check against a running server (uses your API key)
@@ -209,7 +234,7 @@ citations to fill the gap.
 npm test
 ```
 
-156 tests run without an API key:
+184 tests run without an API key:
 
 - **Extraction** — page metadata, segment ID uniqueness, figures and caveats surviving extraction,
   results tables kept whole, paragraph reflow, oversized input rejected rather than truncated,
@@ -348,13 +373,14 @@ lib/
   extract.ts      PDF/text extraction, reflow and segmentation
   schemas.ts      Zod schemas: fact ledger + one per format
   prompts.ts      prompt construction and the injection boundary
-  provider.ts     server-only Gemini access, model fallback, repair retry
+  provider.ts     server-only provider access, model fallback, repair retry
+  providers/      one adapter per provider API shape
   validate.ts     structural checks
   export/         pptx · svg · markdown · videoPackage renderers
   client/         browser API helpers and workspace state
 samples/          synthetic test documents
 scripts/          smoke test, deck builder, screenshot driver
-tests/            156 tests
+tests/            184 tests
 ```
 
 ---

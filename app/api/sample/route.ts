@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { ExtractionError, extractFromImageText, extractFromPdf } from '@/lib/extract';
-import { ProviderError, isProviderConfigured, transcribeImage } from '@/lib/provider';
+import { ProviderError, isVisionConfigured, transcribeImage } from '@/lib/provider';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -32,9 +32,9 @@ export async function GET(request: Request) {
     const bytes = await readFile(path.join(process.cwd(), 'samples', filename));
 
     if (id === 'image') {
-      if (!isProviderConfigured()) {
+      if (!isVisionConfigured()) {
         throw new ExtractionError(
-          'Reading the image sample needs the AI provider, and no API key is configured. ' +
+          'Reading the image sample needs a Gemini key specifically, and none is configured. ' +
             'Try the PDF sample instead.',
           'invalid_input',
         );

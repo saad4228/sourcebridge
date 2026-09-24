@@ -242,10 +242,20 @@ export const infographicSchema = z.object({
   comparison: z
     .object({
       leftLabel: z.string().describe('At most 28 characters.'),
-      leftValue: z.string().describe('A figure or short phrase. Empty string if not applicable.'),
+      leftValue: z
+        .string()
+        .describe(
+          'The headline figure for this side, e.g. 412 L/day. Rendered large, so it ' +
+            'must be short and must not be empty. Supporting detail belongs in leftPoints.',
+        ),
       leftPoints: z.array(z.string()).describe('Up to 3 points, at most 60 characters each.'),
       rightLabel: z.string().describe('At most 28 characters.'),
-      rightValue: z.string().describe('A figure or short phrase. Empty string if not applicable.'),
+      rightValue: z
+        .string()
+        .describe(
+          'The headline figure for this side, e.g. 338 L/day. Rendered large, so it ' +
+            'must be short and must not be empty. Supporting detail belongs in rightPoints.',
+        ),
       rightPoints: z.array(z.string()).describe('Up to 3 points, at most 60 characters each.'),
     })
     .optional()

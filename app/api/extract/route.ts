@@ -10,7 +10,7 @@ import {
   extractFromText,
   extractFromVideoText,
 } from '@/lib/extract';
-import { ProviderError, isProviderConfigured, transcribeMedia } from '@/lib/provider';
+import { ProviderError, isVisionConfigured, transcribeMedia } from '@/lib/provider';
 import { UrlFetchError, fetchArticle } from '@/lib/fetchUrl';
 
 export const runtime = 'nodejs';
@@ -57,10 +57,10 @@ export async function POST(request: Request) {
         const kind = isVideo ? 'video' : 'image';
         const limit = isVideo ? LIMITS.maxVideoBytes : LIMITS.maxImageBytes;
 
-        if (!isProviderConfigured()) {
+        if (!isVisionConfigured()) {
           throw new ExtractionError(
-            `Reading ${isVideo ? 'a video' : 'an image'} needs the AI provider, and no API key is ` +
-              `configured. Add GEMINI_API_KEY to .env.local, or paste the text instead.`,
+            `Reading ${isVideo ? 'a video' : 'an image'} needs a Gemini key specifically, and none ` +
+              `is configured. Add GEMINI_API_KEY to .env.local, or paste the text instead.`,
             'invalid_input',
           );
         }

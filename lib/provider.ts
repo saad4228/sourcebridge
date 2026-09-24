@@ -9,6 +9,11 @@
 import 'server-only';
 import { GoogleGenAI } from '@google/genai';
 import { z } from 'zod';
+import {
+  OpenAICompatibleError,
+  chatJson,
+  type OpenAICompatibleConfig,
+} from './providers/openaiCompatible';
 
 /**
  * The model tried first, overridable with GEMINI_MODEL.
@@ -20,6 +25,9 @@ import { z } from 'zod';
 const DEFAULT_MODEL = 'gemini-3.6-flash';
 
 export class ProviderError extends Error {
+  /** How long the provider asked us to wait, when it said so. */
+  retryAfterMs?: number;
+
   constructor(
     message: string,
     readonly code:
@@ -39,7 +47,20 @@ export class ProviderError extends Error {
   }
 }
 
+/** True when text generation can run on at least one provider. */
 export function isProviderConfigured(): boolean {
+  return Boolean(process.env.GEMINI_API_KEY?.trim() || process.env.GROQ_API_KEY?.trim());
+}
+
+/**
+ * Reading images and video needs Gemini specifically.
+ *
+ * The OpenAI-compatible chain covers text only, so a Groq-only deployment can
+ * generate every format but cannot ingest a screenshot. Routes that need vision
+ * check this rather than isProviderConfigured, so the refusal names the missing
+ * key instead of failing part-way through an upload.
+ */
+export function isVisionConfigured(): boolean {
   return Boolean(process.env.GEMINI_API_KEY?.trim());
 }
 
@@ -47,7 +68,7 @@ function client(): GoogleGenAI {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
   if (!apiKey) {
     throw new ProviderError(
-      'No AI provider key is configured. Add GEMINI_API_KEY to .env.local and restart the dev server.',
+      'This step needs a Gemini key. Add GEMINI_API_KEY to .env.local and restart the dev server.',
       'not_configured',
     );
   }
@@ -88,13 +109,72 @@ const DEFAULT_FALLBACKS = [
  */
 const REQUEST_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS ?? 45_000);
 
-function configuredChain(): string[] {
-  const configured = process.env.GEMINI_FALLBACK_MODELS?.trim();
-  const fallbacks = configured
-    ? configured.split(',').map((m) => m.trim()).filter(Boolean)
+/**
+ * Text models on an OpenAI-compatible provider, tried before Gemini.
+ *
+ * These are put first because they answer in about a second where Gemini's
+ * free tier was measured taking tens of seconds, and because they draw on an
+ * entirely separate allowance — which is what stops a spent Gemini quota
+ * stopping the application.
+ *
+ * Only text generation moves: reading images and video, and speaking
+ * narration, remain Gemini's, because this provider does neither.
+ */
+const DEFAULT_OPENAI_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
+
+/**
+ * Hidden reasoning budget for models that support it.
+ *
+ * Kept low deliberately. These formats are transformations of a supplied
+ * source, not puzzles, and measurement showed low effort roughly halving both
+ * the tokens spent and the time taken with no loss of output quality -- which
+ * also means twice as many requests fit inside the per-minute allowance.
+ */
+const REASONING_EFFORT = (process.env.GROQ_REASONING_EFFORT?.trim() || 'low') as
+  | 'low'
+  | 'medium'
+  | 'high';
+
+/** Where an OpenAI-compatible key points. Groq by default; any such API works. */
+function openAiConfig(): OpenAICompatibleConfig | null {
+  const apiKey = process.env.GROQ_API_KEY?.trim();
+  if (!apiKey) return null;
+  return {
+    apiKey,
+    baseUrl: process.env.GROQ_BASE_URL?.trim() || 'https://api.groq.com/openai/v1',
+    label: process.env.GROQ_LABEL?.trim() || 'Groq',
+  };
+}
+
+/** A model together with the provider that serves it. */
+export interface ModelRef {
+  provider: 'gemini' | 'openai';
+  model: string;
+}
+
+/** Stable key for cooldowns, so the same model on two providers stays distinct. */
+const refKey = (ref: ModelRef) => `${ref.provider}:${ref.model}`;
+
+function configuredChain(): ModelRef[] {
+  const geminiConfigured = process.env.GEMINI_FALLBACK_MODELS?.trim();
+  const geminiFallbacks = geminiConfigured
+    ? geminiConfigured.split(',').map((m) => m.trim()).filter(Boolean)
     : DEFAULT_FALLBACKS;
+
   // Primary first, then fallbacks, without repeating the primary.
-  return [...new Set([modelName(), ...fallbacks])];
+  const gemini: ModelRef[] = [...new Set([modelName(), ...geminiFallbacks])].map((model) => ({
+    provider: 'gemini' as const,
+    model,
+  }));
+
+  if (!openAiConfig()) return gemini;
+
+  const configured = process.env.GROQ_MODELS?.trim();
+  const openai: ModelRef[] = (
+    configured ? configured.split(',').map((m) => m.trim()).filter(Boolean) : DEFAULT_OPENAI_MODELS
+  ).map((model) => ({ provider: 'openai' as const, model }));
+
+  return [...openai, ...gemini];
 }
 
 /**
@@ -110,18 +190,23 @@ const cooldowns = new Map<string, number>();
 /** How long to skip a model after it reports overload or exhausted quota. */
 const COOLDOWN_MS = { unavailable: 60_000, rate_limit: 5 * 60_000, bad_model: 60 * 60_000 } as const;
 
-function markUnavailable(model: string, code: string) {
+function markUnavailable(ref: ModelRef, code: string, statedMs?: number) {
   const ms =
-    code === 'rate_limit'
-      ? COOLDOWN_MS.rate_limit
-      : code === 'bad_model'
-        ? COOLDOWN_MS.bad_model
-        : COOLDOWN_MS.unavailable;
-  cooldowns.set(model, Date.now() + ms);
+    // A provider that names its own wait knows better than any default. Groq's
+    // limits clear in seconds, and standing its models down for the default
+    // five minutes gave the rest of a run to the slow provider for no reason.
+    statedMs !== undefined
+      ? Math.min(statedMs + 500, COOLDOWN_MS.rate_limit)
+      : code === 'rate_limit'
+        ? COOLDOWN_MS.rate_limit
+        : code === 'bad_model'
+          ? COOLDOWN_MS.bad_model
+          : COOLDOWN_MS.unavailable;
+  cooldowns.set(refKey(ref), Date.now() + ms);
 }
 
-function markAvailable(model: string) {
-  cooldowns.delete(model);
+function markAvailable(ref: ModelRef) {
+  cooldowns.delete(refKey(ref));
 }
 
 /**
@@ -129,11 +214,14 @@ function markAvailable(model: string) {
  *
  * If every model is cooling down the full chain is returned anyway: a stale
  * cooldown must never leave the application with nothing to call.
+ *
+ * Pass a provider to narrow the chain to it, which is how vision and speech
+ * stay on Gemini while text generation uses whichever model answers fastest.
  */
-export function modelChain(): string[] {
-  const all = configuredChain();
+export function modelChain(provider?: ModelRef['provider']): ModelRef[] {
+  const all = configuredChain().filter((ref) => !provider || ref.provider === provider);
   const now = Date.now();
-  const live = all.filter((model) => (cooldowns.get(model) ?? 0) <= now);
+  const live = all.filter((ref) => (cooldowns.get(refKey(ref)) ?? 0) <= now);
   return live.length > 0 ? live : all;
 }
 
@@ -179,6 +267,41 @@ function readableDetail(message: string): string {
 /** Map provider failures onto messages an operator can act on. */
 function toProviderError(err: unknown): ProviderError {
   if (err instanceof ProviderError) return err;
+
+  // The OpenAI-compatible adapter carries an HTTP status, which classifies the
+  // failure exactly. Falling through to the text matching below would misread,
+  // say, a rate-limit body that happens to mention a model name.
+  if (err instanceof OpenAICompatibleError) {
+    if (err.status === 401 || err.status === 403) {
+      return new ProviderError(`${err.message} Check GROQ_API_KEY in .env.local.`, 'auth');
+    }
+    if (err.status === 429) {
+      const error = new ProviderError(
+        'That provider rate limit was reached. Another model is being tried.',
+        'rate_limit',
+        true,
+      );
+      error.retryAfterMs = err.retryAfterMs;
+      return error;
+    }
+    // A retired or misspelled model name: retrying it will never help.
+    if (err.status === 404) {
+      return new ProviderError(err.message, 'bad_model', false);
+    }
+    // A 400 here is almost always the model's own output failing schema
+    // validation. That is a fact about this one response, not about the model,
+    // so it must not put the model in cooldown -- doing so retired the fast
+    // provider for an hour over a single malformed reply.
+    if (err.status === 400) {
+      return new ProviderError(
+        'The model returned content that did not match the required structure.',
+        'invalid_output',
+        true,
+      );
+    }
+    if (err.status >= 500) return new ProviderError(err.message, 'unavailable', true);
+    return new ProviderError(err.message, 'upstream', true);
+  }
   const raw = err instanceof Error ? err.message : String(err);
   const message = readableDetail(raw);
   // Classify against the full text: the status code lives in the envelope.
@@ -264,7 +387,7 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
  * failure and tries a different model.
  */
 async function withDeadline<T>(
-  model: string,
+  label: string,
   run: (signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
   const controller = new AbortController();
@@ -274,7 +397,7 @@ async function withDeadline<T>(
   } catch (err) {
     if (controller.signal.aborted) {
       throw new ProviderError(
-        `${model} did not respond within ${Math.round(REQUEST_TIMEOUT_MS / 1000)} seconds.`,
+        `${label} did not respond within ${Math.round(REQUEST_TIMEOUT_MS / 1000)} seconds.`,
         'timeout',
         true,
       );
@@ -292,7 +415,21 @@ async function withDeadline<T>(
  * "fetch failed". It was previously classed as permanent, so a single flaky
  * connection failed the whole format without a retry.
  */
-const TRANSIENT_CODES = new Set(['unavailable', 'rate_limit', 'timeout', 'network']);
+const TRANSIENT_CODES = new Set([
+  'unavailable',
+  'rate_limit',
+  'timeout',
+  'network',
+  'invalid_output',
+]);
+
+/**
+ * Failures that say nothing about the model's health.
+ *
+ * A dropped connection or one malformed reply is not grounds for standing a
+ * model down: the next request to it may well succeed.
+ */
+const NO_COOLDOWN_CODES = new Set(['network', 'invalid_output']);
 /**
  * Give every model in the chain a turn, plus a couple of retries for a model
  * that was merely unlucky. A fixed budget smaller than the chain would leave
@@ -303,39 +440,85 @@ function attemptBudget(chainLength: number): number {
 }
 
 /**
+ * A stated rate-limit delay this short is worth waiting out.
+ *
+ * The providers are not interchangeable in speed: the fast one answers in
+ * about a second, the slow one was measured taking over two minutes for the
+ * same format. So when the fast one says "try again in eight seconds", doing
+ * exactly that beats falling through, by an order of magnitude.
+ */
+const RATE_LIMIT_WAIT_MS = Number(process.env.PROVIDER_RATE_LIMIT_WAIT_MS ?? 12_000);
+
+/** How often one call may wait before falling through is the better bet. */
+const MAX_RATE_LIMIT_WAITS = 2;
+
+/**
  * Invoke `fn`, moving to another model when one refuses work.
  *
  * A model that reports overload is put in cooldown, so the remaining formats in
  * a run skip it instead of each rediscovering it. Permanent failures (a rejected
  * key) fail immediately.
+ *
+ * The chain is supplied by the caller, so a step only one provider can serve is
+ * never handed a model incapable of the work.
+ *
+ * Exported for tests: the ordering and cooldown rules here decide whether a run
+ * takes seconds or minutes, which is worth asserting directly.
  */
-async function withRetry<T>(fn: (model: string) => Promise<T>): Promise<{ value: T; model: string }> {
-  const chain = modelChain();
+export async function withRetry<T>(
+  chain: ModelRef[],
+  fn: (ref: ModelRef) => Promise<T>,
+): Promise<{ value: T; model: string }> {
+  if (chain.length === 0) {
+    throw new ProviderError(
+      'No model is configured for this step. Add a provider key to .env.local.',
+      'not_configured',
+    );
+  }
   let lastError: ProviderError | undefined;
 
   const maxAttempts = attemptBudget(chain.length);
+  // Tracked separately from the attempt count, because waiting out a short
+  // rate limit retries the same model and must not spend its place in the
+  // chain -- otherwise a brief limit would still cost us the fast provider.
+  let index = 0;
+  let waits = 0;
 
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; ) {
     // Rotate through the chain, then start again from the top.
-    const model = chain[attempt % chain.length];
+    const ref = chain[index % chain.length];
     try {
-      const value = await fn(model);
-      markAvailable(model);
-      return { value, model };
+      const value = await fn(ref);
+      markAvailable(ref);
+      return { value, model: ref.model };
     } catch (err) {
       const error = toProviderError(err);
+
+      if (
+        error.code === 'rate_limit' &&
+        error.retryAfterMs !== undefined &&
+        error.retryAfterMs <= RATE_LIMIT_WAIT_MS &&
+        waits < MAX_RATE_LIMIT_WAITS
+      ) {
+        waits++;
+        // A little past the stated time, so the limit has certainly cleared.
+        await sleep(error.retryAfterMs + 250);
+        continue;
+      }
+
       // A retired model name is permanent for that model but the next one in
       // the chain may still work, so keep going unless nothing is left.
       const worthRetrying = TRANSIENT_CODES.has(error.code) || error.code === 'bad_model';
-      if (worthRetrying && error.code !== 'network') {
+      if (worthRetrying && !NO_COOLDOWN_CODES.has(error.code)) {
         // Remember this model is refusing work, so other formats skip it.
-        markUnavailable(model, error.code);
+        markUnavailable(ref, error.code, error.retryAfterMs);
       }
-      if (!worthRetrying || attempt === maxAttempts - 1) throw error;
+      attempt++;
+      index++;
+      if (!worthRetrying || attempt === maxAttempts) throw error;
       lastError = error;
       // Only pause once we have been round the whole chain.
-      const exhaustedChain = (attempt + 1) % chain.length === 0;
-      if (exhaustedChain) await sleep(2000);
+      if (index % chain.length === 0) await sleep(2000);
     }
   }
 
@@ -370,18 +553,41 @@ export interface GenerateJsonResult<T> {
 export async function generateJson<T>(
   options: GenerateJsonOptions<T>,
 ): Promise<GenerateJsonResult<T>> {
-  const ai = client();
   const started = Date.now();
   const responseSchema = sanitizeSchema(z.toJSONSchema(options.schema)) as JsonSchema;
 
-  let usedModel = modelName();
+  // Built on demand rather than up front: a deployment with only an
+  // OpenAI-compatible key has no Gemini credentials, and constructing the
+  // client eagerly would fail the request before the chain was even consulted.
+  let gemini: GoogleGenAI | undefined;
+
+  let usedModel = modelChain()[0]?.model ?? modelName();
 
   const call = async (prompt: string): Promise<string> => {
-    const { value, model } = await withRetry(async (candidate) =>
-      withDeadline(candidate, (signal) =>
-        ai.models
+    const { value, model } = await withRetry(modelChain(), (ref) =>
+      withDeadline(ref.model, (signal) => {
+        if (ref.provider === 'openai') {
+          const config = openAiConfig();
+          if (!config) {
+            throw new ProviderError('The OpenAI-compatible key went missing.', 'not_configured');
+          }
+          return chatJson(config, {
+            model: ref.model,
+            system: options.system,
+            prompt,
+            schema: responseSchema,
+            schemaName: 'response',
+            temperature: options.temperature,
+            maxOutputTokens: options.maxOutputTokens,
+            reasoningEffort: REASONING_EFFORT,
+            signal,
+          });
+        }
+
+        gemini ??= client();
+        return gemini.models
           .generateContent({
-            model: candidate,
+            model: ref.model,
             contents: prompt,
             config: {
               systemInstruction: options.system,
@@ -392,8 +598,8 @@ export async function generateJson<T>(
               abortSignal: signal,
             },
           })
-          .then((response) => response.text ?? ''),
-      ),
+          .then((response) => response.text ?? '');
+      }),
     );
     usedModel = model;
     return value;
@@ -563,11 +769,13 @@ export async function transcribeMedia(
   const ai = client();
   const started = Date.now();
 
-  const { value, model } = await withRetry(async (candidate) =>
-    withDeadline(candidate, (signal) =>
+  // Gemini only: the OpenAI-compatible chain has no vision model, so offering
+  // it here would burn an attempt on a request it cannot serve.
+  const { value, model } = await withRetry(modelChain('gemini'), (ref) =>
+    withDeadline(ref.model, (signal) =>
       ai.models
         .generateContent({
-          model: candidate,
+          model: ref.model,
           contents: [
             {
               parts: [

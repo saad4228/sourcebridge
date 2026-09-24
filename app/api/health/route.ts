@@ -1,5 +1,11 @@
 import { NextResponse } from 'next/server';
-import { isProviderConfigured, modelName, pingProvider, ProviderError } from '@/lib/provider';
+import {
+  isProviderConfigured,
+  modelChain,
+  modelName,
+  pingProvider,
+  ProviderError,
+} from '@/lib/provider';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -15,7 +21,8 @@ export async function GET() {
         configured: false,
         reachable: false,
         message:
-          'No API key found. Add GEMINI_API_KEY to .env.local, then restart the dev server.',
+          'No API key found. Add GEMINI_API_KEY or GROQ_API_KEY to .env.local, then restart ' +
+          'the dev server.',
       },
       { status: 200 },
     );
@@ -36,7 +43,7 @@ export async function GET() {
       {
         configured: true,
         reachable: false,
-        model: modelName(),
+        model: modelChain()[0]?.model ?? modelName(),
         code: provider?.code ?? 'upstream',
         message: provider?.message ?? 'Provider call failed.',
       },
