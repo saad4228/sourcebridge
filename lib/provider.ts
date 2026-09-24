@@ -10,11 +10,14 @@ import 'server-only';
 import { GoogleGenAI } from '@google/genai';
 import { z } from 'zod';
 
-// Free-tier daily quotas are per-model and small on the flagship flash models
-// (gemini-3.6-flash allows 20 requests/day). The lite models carry far higher
-// limits, so the default primary is a lite model and the chain spreads load
-// across several — one seven-format run costs eight requests.
-const DEFAULT_MODEL = 'gemini-flash-lite-latest';
+/**
+ * The model tried first, overridable with GEMINI_MODEL.
+ *
+ * Free-tier daily quotas are per-model and small on the flagship flash models,
+ * so no single model carries a working day: the chain below spreads the load,
+ * and one seven-format run costs eight requests.
+ */
+const DEFAULT_MODEL = 'gemini-3.6-flash';
 
 export class ProviderError extends Error {
   constructor(
@@ -56,20 +59,14 @@ export function modelName(): string {
 }
 
 /**
- * Models tried in order when the primary is overloaded.
+ * Models tried when the primary will not serve, ordered by measured
+ * reliability rather than by tier. Override with GEMINI_FALLBACK_MODELS.
  *
- * Free-tier capacity fluctuates: a model can return 503 "high demand" for a
- * minute and be fine the next. Rotating to a different model recovers far
- * faster than waiting on one that is currently saturated. Override the whole
- * chain with GEMINI_FALLBACK_MODELS (comma-separated).
- */
-/**
- * Ordered by measured reliability, not by tier.
- *
- * The lite models look attractive on paper but were observed refusing work for
- * sustained periods, and — worse — occasionally accepting a request and then
- * hanging for minutes. They are kept at the end as a last resort rather than
- * tried first.
+ * Free-tier capacity fluctuates minute to minute, so rotating to a different
+ * model recovers far faster than waiting on a saturated one. The lite models
+ * look attractive on paper but were observed refusing work for sustained
+ * periods and — worse — occasionally accepting a request then hanging for
+ * minutes, so they sit at the end as a last resort.
  */
 const DEFAULT_FALLBACKS = [
   'gemini-3.5-flash',
@@ -158,11 +155,34 @@ function sanitizeSchema(node: unknown): unknown {
   return out;
 }
 
+/**
+ * Pull the human-readable part out of a provider error.
+ *
+ * The SDK surfaces failures as a raw JSON envelope. Interpolating that into a
+ * message puts `{"error":{"code":500,...}}` in front of the operator, which
+ * tells them nothing they can act on.
+ */
+function readableDetail(message: string): string {
+  const start = message.indexOf('{');
+  if (start !== -1) {
+    try {
+      const parsed = JSON.parse(message.slice(start));
+      const inner = parsed?.error?.message;
+      if (typeof inner === 'string' && inner.trim()) return inner.trim();
+    } catch {
+      // Not JSON after all; fall through to the original text.
+    }
+  }
+  return message;
+}
+
 /** Map provider failures onto messages an operator can act on. */
 function toProviderError(err: unknown): ProviderError {
   if (err instanceof ProviderError) return err;
-  const message = err instanceof Error ? err.message : String(err);
-  const lower = message.toLowerCase();
+  const raw = err instanceof Error ? err.message : String(err);
+  const message = readableDetail(raw);
+  // Classify against the full text: the status code lives in the envelope.
+  const lower = raw.toLowerCase();
 
   if (lower.includes('api key') || lower.includes('unauthenticated') || lower.includes('permission')) {
     return new ProviderError(
@@ -195,6 +215,16 @@ function toProviderError(err: unknown): ProviderError {
       true,
     );
   }
+  // A 500 is the provider failing on its own side. It says nothing about this
+  // request, so another model is worth trying — treating it as permanent meant
+  // giving up while a healthy model sat unused further down the chain.
+  if (lower.includes('"code":500') || lower.includes('internal error') || lower.includes('"internal"')) {
+    return new ProviderError(
+      'The AI provider hit an internal error on this model. Another model is being tried.',
+      'unavailable',
+      true,
+    );
+  }
   if (lower.includes('404') || lower.includes('not_found') || lower.includes('no longer available')) {
     // A wrong or retired model name -- retrying will never help.
     return new ProviderError(
@@ -218,7 +248,9 @@ function toProviderError(err: unknown): ProviderError {
       true,
     );
   }
-  return new ProviderError(`AI provider error: ${message}`, 'upstream', true);
+  // Unrecognised, but still worth another model: an unclassified failure on one
+  // model is no reason to give up on the rest of the chain.
+  return new ProviderError(`AI provider error: ${message}`, 'unavailable', true);
 }
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -261,7 +293,14 @@ async function withDeadline<T>(
  * connection failed the whole format without a retry.
  */
 const TRANSIENT_CODES = new Set(['unavailable', 'rate_limit', 'timeout', 'network']);
-const MAX_ATTEMPTS = 6;
+/**
+ * Give every model in the chain a turn, plus a couple of retries for a model
+ * that was merely unlucky. A fixed budget smaller than the chain would leave
+ * the last models never tried at all.
+ */
+function attemptBudget(chainLength: number): number {
+  return chainLength + 2;
+}
 
 /**
  * Invoke `fn`, moving to another model when one refuses work.
@@ -274,7 +313,9 @@ async function withRetry<T>(fn: (model: string) => Promise<T>): Promise<{ value:
   const chain = modelChain();
   let lastError: ProviderError | undefined;
 
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+  const maxAttempts = attemptBudget(chain.length);
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     // Rotate through the chain, then start again from the top.
     const model = chain[attempt % chain.length];
     try {
@@ -290,7 +331,7 @@ async function withRetry<T>(fn: (model: string) => Promise<T>): Promise<{ value:
         // Remember this model is refusing work, so other formats skip it.
         markUnavailable(model, error.code);
       }
-      if (!worthRetrying || attempt === MAX_ATTEMPTS - 1) throw error;
+      if (!worthRetrying || attempt === maxAttempts - 1) throw error;
       lastError = error;
       // Only pause once we have been round the whole chain.
       const exhaustedChain = (attempt + 1) % chain.length === 0;
