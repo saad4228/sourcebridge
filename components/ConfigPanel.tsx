@@ -9,6 +9,7 @@
 
 import { useState } from 'react';
 import { Badge, Button, Field, Panel, Select, Spinner, cx } from './ui';
+import { FormatIcon } from './FormatIcon';
 import { FORMAT_DESCRIPTIONS, FORMAT_IDS, FORMAT_LABELS } from '@/lib/types';
 import type { FormatId, GenerationBrief } from '@/lib/types';
 
@@ -93,6 +94,7 @@ export function ConfigPanel({
                   onChange={() => onToggleFormat(format)}
                   className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[var(--color-accent)]"
                 />
+                <FormatIcon format={format} className="mt-0.5 h-4 w-4 text-[var(--color-accent)]" />
                 <span className="min-w-0">
                   <span className="block text-xs font-medium text-[var(--color-ink)]">
                     {FORMAT_LABELS[format]}

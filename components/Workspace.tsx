@@ -16,6 +16,7 @@ import { OutputPanel } from './OutputPanel';
 import { FactLedgerPanel } from './FactLedgerPanel';
 import { EvidenceDrawer } from './EvidenceDrawer';
 import { ThemeToggle } from './ThemeToggle';
+import { BRAND_MARK } from './brandMark';
 import { Badge, Button, Callout, Panel, Spinner, cx } from './ui';
 import {
   analyzeSource,
@@ -218,6 +219,21 @@ export function Workspace() {
     setToast(result.ok ? `Downloaded ${result.data}` : result.error);
   }, []);
 
+  /** Return to the start, confirming first if completed work would be lost. */
+  const handleGoHome = useCallback(() => {
+    const { artifacts, source, creativePrompt } = stateRef.current;
+    const hasWork = Object.values(artifacts).some((a) => a?.status === 'complete');
+    if (!source && !creativePrompt.trim()) return;
+    if (hasWork) {
+      const confirmed = window.confirm(
+        'Start again? Generated artefacts are held in this tab only and will be lost. ' +
+          'Download anything you want to keep first.',
+      );
+      if (!confirmed) return;
+    }
+    dispatch({ type: 'reset' });
+  }, []);
+
   // --- Derived -----------------------------------------------------------
   const progress = useMemo(
     () => progressOf(state, state.brief.formats),
@@ -266,19 +282,25 @@ export function Workspace() {
       {/* --- Header ------------------------------------------------------- */}
       <header className="sticky top-0 z-30 border-b border-[var(--color-rule)] bg-[var(--color-surface)]/95 backdrop-blur">
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-3 px-4 py-2.5">
-          <div className="flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-md bg-[var(--color-accent)] text-sm font-bold text-[var(--color-accent-contrast)]">
-              S
-            </span>
-            <div>
-              <h1 className="text-sm font-semibold leading-tight text-[var(--color-ink)]">
+          {/* The brand returns to the start, confirming first if work would be lost. */}
+          <button
+            type="button"
+            onClick={handleGoHome}
+            aria-label="SourceBridge — return to the start"
+            className="flex items-center gap-2 rounded-md px-1 py-0.5 text-left transition-colors hover:bg-[var(--color-surface-sunken)]"
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element -- an inlined
+                data URI: there is no request for next/image to optimise. */}
+            <img src={BRAND_MARK} alt="" width={28} height={28} className="h-7 w-7 rounded-md" />
+            <span>
+              <span className="block text-sm font-semibold leading-tight text-[var(--color-ink)]">
                 SourceBridge
-              </h1>
-              <p className="text-[10px] leading-tight text-[var(--color-ink-faint)]">
+              </span>
+              <span className="block text-[10px] leading-tight text-[var(--color-ink-faint)]">
                 One source. Multiple formats. Traceable facts.
-              </p>
-            </div>
-          </div>
+              </span>
+            </span>
+          </button>
 
           <div className="ml-auto flex items-center gap-2">
             <ThemeToggle />

@@ -11,6 +11,7 @@
 import { useRef, useState } from 'react';
 import { Badge, Button, Callout, EmptyState, Panel, Spinner, cx } from './ui';
 import { ArtifactPreview } from './previews';
+import { FormatIcon } from './FormatIcon';
 import { worstSeverity } from '@/lib/validate';
 import { renderMarkdown } from '@/lib/export/markdown';
 import { activeContent } from '@/lib/types';
@@ -196,6 +197,7 @@ export function OutputPanel({
               )}
             >
               <StatusDot status={item.status} />
+              <FormatIcon format={format} className="h-3.5 w-3.5" brandColour={false} />
               {FORMAT_LABELS[format]}
               {item.edited !== null && <span title="Edited" className="text-[var(--color-accent)]">•</span>}
               {severity === 'error' && <span className="text-[var(--color-danger)]">!</span>}

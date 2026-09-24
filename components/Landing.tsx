@@ -10,19 +10,9 @@
 
 import { useRef, useState } from 'react';
 import { Button, Spinner, cx } from './ui';
+import { FormatIcon } from './FormatIcon';
 import { LIMITS } from '@/lib/extract';
 import { FORMAT_DESCRIPTIONS, FORMAT_IDS, FORMAT_LABELS } from '@/lib/types';
-
-/** Small inline glyph per format. Decorative; labels carry the meaning. */
-const FORMAT_ICONS: Record<string, string> = {
-  exec_summary: 'M4 4h12v2H4zm0 4h12v2H4zm0 4h8v2H4z',
-  linkedin: 'M4 7h3v9H4zm1.5-4a1.7 1.7 0 1 1 0 3.4 1.7 1.7 0 0 1 0-3.4zM9 7h3v1.3A3.2 3.2 0 0 1 16 10v6h-3v-5c0-1-.6-1.6-1.4-1.6S10 10 10 11v5H9z',
-  x_thread: 'M4 3h12v3H4zm0 5h12v3H4zm0 5h8v3H4z',
-  advisory: 'M10 2l8 15H2zm-1 5h2v5H9zm0 6h2v2H9z',
-  presentation: 'M2 3h16v2H2zm1 3h14v7H3zm5 8h4l1 3H7z',
-  infographic: 'M3 16V8h3v8zm5 0V3h3v13zm5 0v-6h3v6z',
-  video_package: 'M2 5h11v10H2zm12 3l4-2.5v9L14 12z',
-};
 
 export function Landing({
   busy,
@@ -328,16 +318,10 @@ export function Landing({
               key={format}
               className="flex w-full items-start gap-2.5 rounded-lg border border-[var(--color-rule)] bg-[var(--color-surface)] px-3 py-2.5 sm:w-[calc(50%-0.25rem)] lg:w-[calc(33.333%-0.5rem)]"
             >
-              <svg
-                width="17"
-                height="17"
-                viewBox="0 0 20 20"
-                fill="currentColor"
-                className="mt-0.5 shrink-0 text-[var(--color-accent)]"
-                aria-hidden="true"
-              >
-                <path d={FORMAT_ICONS[format]} />
-              </svg>
+              <FormatIcon
+                format={format}
+                className="mt-0.5 h-5 w-5 text-[var(--color-accent)]"
+              />
               <div className="min-w-0">
                 <p className="text-[13px] font-medium text-[var(--color-ink)]">
                   {FORMAT_LABELS[format]}
@@ -356,7 +340,7 @@ export function Landing({
         <h2 className="text-xs font-semibold text-[var(--color-ink)]">What this prototype does not do</h2>
         <ul className="mt-2 grid gap-1.5 text-[11px] leading-relaxed text-[var(--color-ink-muted)] sm:grid-cols-2">
           <li>• Images and video are AI transcriptions; scanned PDFs are still rejected.</li>
-          <li>• No rendered video — the video output is a production package.</li>
+          <li>• Video frames are drawn by this app, never by an image model.</li>
           <li>• Checks are structural; they do not verify that content is true.</li>
           <li>• Nothing is saved — work is lost on refresh, so download it.</li>
         </ul>

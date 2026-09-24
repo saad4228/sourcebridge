@@ -16,7 +16,13 @@ export const metadata: Metadata = {
   title: "SourceBridge",
   description:
     "Turn one source into a coordinated communication package, with visible evidence and human control.",
-  icons: { icon: "/favicon.svg" },
+  icons: {
+    icon: [
+      { url: "/favicon.png", sizes: "32x32", type: "image/png" },
+      { url: "/icon.png", sizes: "500x500", type: "image/png" },
+    ],
+    apple: "/apple-icon.png",
+  },
 };
 
 /**

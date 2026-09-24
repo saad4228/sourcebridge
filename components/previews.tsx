@@ -14,6 +14,8 @@ import { Badge, cx } from './ui';
 import { renderInfographicSvg } from '@/lib/export/svg';
 import { resolveLayout, type Slide, type SlideLayout } from '@/lib/export/slideLayout';
 import { resolveInfographicLayout } from '@/lib/export/infographicLayout';
+import { FormatIcon } from './FormatIcon';
+import { shareToLinkedIn, shareToX, type ShareOutcome } from '@/lib/client/share';
 import { X_POST_CHAR_LIMIT } from '@/lib/schemas';
 import type {
   Advisory,
@@ -245,13 +247,24 @@ function LinkedInPreview({ content, editing, onChange, onEvidence }: PreviewProp
           )}
         </div>
 
-        <footer className="flex items-center justify-between border-t border-[var(--color-rule)] px-4 py-2">
+        <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--color-rule)] px-4 py-2">
           <EvidenceChip ids={content.evidence} onEvidence={onEvidence} />
-          <span className="text-[11px] text-[var(--color-ink-faint)]">
-            {charCount.toLocaleString()} characters
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-[var(--color-ink-faint)]">
+              {charCount.toLocaleString()} characters
+            </span>
+            <PostButton
+              label="Post on LinkedIn"
+              format="linkedin"
+              onShare={() => shareToLinkedIn(content)}
+            />
+          </div>
         </footer>
       </article>
+      <p className="mt-2 text-center text-[11px] text-[var(--color-ink-faint)]">
+        LinkedIn does not allow a link to prefill its composer, so the post is copied to your
+        clipboard and the composer opened — paste once and publish.
+      </p>
     </div>
   );
 }
@@ -338,10 +351,71 @@ function XThreadPreview({ content, editing, onChange, onEvidence }: PreviewProps
           </article>
         );
       })}
+      <div className="flex justify-center">
+        <PostButton label="Post on X" format="x_thread" onShare={() => shareToX(content)} />
+      </div>
       <p className="text-center text-[11px] text-[var(--color-ink-faint)]">
-        Character counts are approximate. The platform counts links and emoji differently.
+        {content.posts.length > 1
+          ? 'X fills in the first post only; the full thread is copied so you can add the replies.'
+          : 'X opens with your post filled in.'}{' '}
+        Character counts are approximate — the platform counts links and emoji differently.
       </p>
     </div>
+  );
+}
+
+/**
+ * Hands a finished post to its platform.
+ *
+ * What actually happens differs by platform, so the result message says which:
+ * X arrives prefilled, LinkedIn arrives copied and ready to paste.
+ */
+function PostButton({
+  label,
+  format,
+  onShare,
+}: {
+  label: string;
+  format: 'linkedin' | 'x_thread';
+  onShare: () => Promise<ShareOutcome>;
+}) {
+  const [status, setStatus] = useState<ShareOutcome | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  return (
+    <span className="relative inline-flex flex-col items-end">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            setStatus(await onShare());
+          } finally {
+            setBusy(false);
+          }
+        }}
+        className={cx(
+          'inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
+          'bg-[var(--color-accent)] text-[var(--color-accent-contrast)]',
+          'hover:bg-[var(--color-accent-hover)] disabled:opacity-60',
+        )}
+      >
+        <FormatIcon format={format} className="h-3.5 w-3.5" brandColour={false} />
+        {label}
+      </button>
+      {status && (
+        <span
+          role="status"
+          className={cx(
+            'mt-1 max-w-xs text-right text-[11px] leading-snug',
+            status.ok ? 'text-[var(--color-ink-faint)]' : 'text-[var(--color-danger)]',
+          )}
+        >
+          {status.message}
+        </span>
+      )}
+    </span>
   );
 }
 
