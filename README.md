@@ -38,6 +38,7 @@ Built for SIH 2026, problem statement 26154.
 | `.svg` infographic export | Implemented |
 | Four infographic layouts (stats, chart, comparison, qualitative) | Implemented |
 | Video package `.zip` (script, storyboard, narration, SRT) | Implemented |
+| Rendered `.mp4` with spoken narration and audio-aligned subtitles | Implemented — needs ffmpeg |
 | "Download all" — every completed format in one archive | Implemented |
 | Automatic model fallback when the provider is overloaded | Implemented |
 | Light / dark theme with a header toggle | Implemented |
@@ -59,9 +60,14 @@ Stated plainly, because the interface is not allowed to imply otherwise:
 - **No OCR for PDFs.** Scanned PDFs are rejected with a clear message. Images *are* supported, but
   they are read by a vision model — a transcription, not a literal extraction — and every
   image-sourced document carries a warning saying so.
-- **No rendered video.** The video output is a production package (script, storyboard, narration,
-  subtitles). No MP4, no audio. Subtitle timings are **estimates** derived from narration length and
-  are labelled as such inside the exported file.
+- **Rendered video needs ffmpeg on the host.** Where ffmpeg is present, SourceBridge speaks the
+  narration with the provider's TTS model, draws every frame with its own renderer, and composites
+  an MP4 — so on-screen figures are exact and subtitles align to the audio actually produced. Where
+  ffmpeg is absent the app says so and offers the `.zip` package instead, whose subtitle timings
+  remain **estimates** and are labelled as such. Serverless hosts generally do not provide ffmpeg.
+- **No generative video or imagery.** Frames are drawn by application code, never by an image or
+  video model. That is deliberate: a generative model cannot be trusted to render a figure
+  correctly, and in a video the viewer has no way to check it.
 - **No fact verification.** Validation is structural: it checks that evidence IDs resolve, that
   figures in the output also appear in the source, and that content fits its layout. It does **not**
   check whether the content is true or correctly interpreted.
@@ -80,6 +86,8 @@ Stated plainly, because the interface is not allowed to imply otherwise:
 ## Prerequisites
 
 - **Node.js 20 or newer.** Developed and tested on Node 24.18.0 / npm 11.16.0.
+- **ffmpeg (optional).** Only needed for the rendered `.mp4` export. Everything else works
+  without it. Install with `winget install Gyan.FFmpeg`, or set `FFMPEG_PATH` to the binary.
 - **A Google Gemini API key.** The free tier is sufficient — no billing setup required. Get one at
   <https://aistudio.google.com/apikey>.
 
@@ -141,7 +149,7 @@ startup.
 npm run dev         # development server
 npm run build       # production build
 npm run start       # production server (after build)
-npm test            # 127 tests, no API key required
+npm test            # 141 tests, no API key required
 npm run typecheck   # TypeScript, no emit
 npm run lint        # ESLint
 npm run smoke       # live end-to-end check against a running server (uses your API key)
@@ -149,6 +157,7 @@ npm run build:deck  # regenerate the technical presentation via SourceBridge's o
 node scripts/theme-check.mjs <dir>          # capture both themes in a browser
 node scripts/render-deck.mjs <out.pptx>     # export a deck covering every slide layout
 node scripts/render-infographics.mjs <dir>  # render all four infographic layouts
+node scripts/render-video.mjs <out.mp4>     # render a video package to MP4 (uses TTS quota)
 powershell -File scripts/pptx-to-png.ps1 <in.pptx> <dir>   # open a .pptx in PowerPoint, export PNGs
 ```
 
@@ -193,7 +202,7 @@ citations to fill the gap.
 npm test
 ```
 
-127 tests run without an API key:
+141 tests run without an API key:
 
 - **Extraction** — page metadata, segment ID uniqueness, figures and caveats surviving extraction,
   results tables kept whole, paragraph reflow, oversized input rejected rather than truncated,
@@ -338,7 +347,7 @@ lib/
   client/         browser API helpers and workspace state
 samples/          synthetic test documents
 scripts/          smoke test, deck builder, screenshot driver
-tests/            127 tests
+tests/            141 tests
 ```
 
 ---

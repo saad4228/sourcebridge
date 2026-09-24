@@ -142,6 +142,21 @@ describe('infographic rendering', () => {
     expect(body).toContain('Lower demand');
   });
 
+  it('breaks an unbroken string rather than letting it run off the canvas', () => {
+    // A URL, an identifier, or a script without spaces cannot be wrapped on
+    // whitespace, so it has to be hard-broken.
+    const svg = renderInfographicSvg(
+      graphic({ headline: `https://example.gov.in/${'a'.repeat(200)}` }),
+    );
+
+    // The accessible <title> keeps the full string; the drawn text must not.
+    const body = drawn(svg);
+    expect(body).not.toContain('a'.repeat(200));
+
+    const lines = [...body.matchAll(/<text[^>]*>([^<]*)<\/text>/g)].map((m) => m[1]);
+    for (const line of lines) expect(line.length).toBeLessThanOrEqual(80);
+  });
+
   it('fits the canvas to the content instead of padding it out', () => {
     const sparse = canvasHeight(renderInfographicSvg(graphic({ layout: 'qualitative', statistics: [] })));
     const full = canvasHeight(

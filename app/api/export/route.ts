@@ -6,17 +6,21 @@ import { renderInfographicSvg } from '@/lib/export/svg';
 import { renderVideoPackageZip } from '@/lib/export/videoPackage';
 import { provenanceFooter, renderMarkdown } from '@/lib/export/markdown';
 import { renderBundle } from '@/lib/export/bundle';
+import { VideoRenderError, renderVideo } from '@/lib/export/video';
 import { briefWireSchema } from '@/lib/wire';
 import { FORMAT_IDS } from '@/lib/types';
 import type { GenerationBrief } from '@/lib/types';
 import type { Infographic, Presentation, VideoPackage } from '@/lib/schemas';
 
 export const runtime = 'nodejs';
+// Rendering a video speaks every scene and then encodes, so it needs far longer
+// than a pure renderer.
+export const maxDuration = 300;
 export const dynamic = 'force-dynamic';
 
 const requestSchema = z.object({
   format: z.enum(FORMAT_IDS),
-  kind: z.enum(['markdown', 'text', 'pptx', 'svg', 'zip']),
+  kind: z.enum(['markdown', 'text', 'pptx', 'svg', 'zip', 'mp4']),
   /** The content to render: the operator's edited version when one exists. */
   content: z.unknown(),
   sourceTitle: z.string().nullable().optional(),
@@ -144,6 +148,18 @@ export async function POST(request: Request) {
         return fileResponse(svg, `${base}-infographic.svg`, 'image/svg+xml');
       }
 
+      case 'mp4': {
+        if (body.format !== 'video_package') {
+          return NextResponse.json({ error: 'MP4 export applies only to video packages.' }, { status: 400 });
+        }
+        const rendered = await renderVideo(content as VideoPackage, { sourceTitle });
+        const response = fileResponse(rendered.mp4, `${base}-video.mp4`, 'video/mp4');
+        // Measured from the rendered audio, so it is safe to state.
+        response.headers.set('X-Video-Seconds', rendered.totalSeconds.toFixed(1));
+        response.headers.set('X-Video-Voice', rendered.voice);
+        return response;
+      }
+
       case 'zip': {
         if (body.format !== 'video_package') {
           return NextResponse.json({ error: 'Package export applies only to video packages.' }, { status: 400 });
@@ -163,6 +179,13 @@ export async function POST(request: Request) {
       }
     }
   } catch (err) {
+    if (err instanceof VideoRenderError) {
+      // A missing ffmpeg is a host capability gap, not a bad request.
+      return NextResponse.json(
+        { error: err.message, kind: err.kind },
+        { status: err.kind === 'no_ffmpeg' ? 501 : 500 },
+      );
+    }
     console.error(`[export:${body.format}:${body.kind}] failed`, err);
     return NextResponse.json(
       { error: 'The file could not be generated. The artefact itself is unaffected.' },

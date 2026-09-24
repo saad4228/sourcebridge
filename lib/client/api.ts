@@ -199,7 +199,7 @@ export async function runBounded<T>(
 // Export
 // ---------------------------------------------------------------------------
 
-export type ExportKind = 'markdown' | 'text' | 'pptx' | 'svg' | 'zip';
+export type ExportKind = 'markdown' | 'text' | 'pptx' | 'svg' | 'zip' | 'mp4';
 
 export interface ExportInput {
   kind: ExportKind;

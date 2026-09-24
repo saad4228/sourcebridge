@@ -55,7 +55,19 @@ const n = (value: number) => Number(value.toFixed(1));
  */
 function wrap(text: string, charsPerLine: number, maxLines: number, factor = 1): string[] {
   charsPerLine = Math.max(8, Math.floor(charsPerLine * factor));
-  const words = text.trim().split(/\s+/).filter(Boolean);
+
+  // A single token longer than the line budget (a URL, an identifier, or a
+  // script that does not use spaces) has to be broken, or it overflows its box.
+  const words = text
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .flatMap((word) =>
+      word.length <= charsPerLine
+        ? [word]
+        : (word.match(new RegExp(`.{1,${charsPerLine}}`, 'g')) ?? [word]),
+    );
+
   const lines: string[] = [];
   let line = '';
 

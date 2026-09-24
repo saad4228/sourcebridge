@@ -120,6 +120,23 @@ Charts are native PowerPoint chart parts and hand-drawn SVG, built from values t
 as data. Those values are checked against the source exactly like prose figures — an invented
 number is caught whether it was written in a sentence or plotted on an axis.
 
+### Rendered video
+
+Where ffmpeg is available, a video package can be rendered to MP4. The provider speaks each
+scene’s narration; the application draws every frame; ffmpeg composites the two.
+
+No image or video model is involved, and that is the point. A generative model cannot be relied on
+to render “18%” as “18%”, and in a video the viewer has no way to check it — so the frames are drawn
+by the same deterministic code that draws the infographic.
+
+Speaking the narration also removes a caveat rather than adding a feature. The provider returns raw
+PCM, so each scene’s true duration follows from the byte count exactly. The subtitles shipped with
+the MP4 are therefore aligned to real audio, where the `.zip` package’s remain estimates derived
+from narration length and are labelled as such.
+
+ffmpeg is a host capability, not a dependency the app can guarantee: when it is missing the export
+reports that plainly, names the fix, and points at the package export that still works.
+
 ### Evidence handling
 
 Every factual element carries an `evidence` array of segment IDs. The system message lists the valid

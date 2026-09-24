@@ -33,7 +33,8 @@ const EXPORTS: Record<FormatId, { kind: ExportKind; label: string; primary?: boo
     { kind: 'markdown', label: 'Markdown' },
   ],
   video_package: [
-    { kind: 'zip', label: 'Download package (.zip)', primary: true },
+    { kind: 'mp4', label: 'Render video (.mp4)', primary: true },
+    { kind: 'zip', label: 'Package (.zip)' },
     { kind: 'markdown', label: 'Markdown' },
   ],
 };

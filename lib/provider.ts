@@ -297,6 +297,88 @@ const MEDIA_PROMPTS: Record<MediaKind, string> = {
   ].join('\n'),
 };
 
+/**
+ * Text-to-speech models, tried in order.
+ *
+ * Separate from the text chain: TTS is a different model family with its own
+ * per-model daily allowance, so exhausting one does not affect generation.
+ */
+const DEFAULT_TTS_MODELS = ['gemini-2.5-flash-preview-tts', 'gemini-3.8-flash-tts'];
+
+function ttsChain(): string[] {
+  const configured = process.env.GEMINI_TTS_MODELS?.trim();
+  const models = configured
+    ? configured.split(',').map((m) => m.trim()).filter(Boolean)
+    : DEFAULT_TTS_MODELS;
+  return [...new Set(models)];
+}
+
+export interface SpeechResult {
+  /** Raw signed 16-bit little-endian PCM, mono. */
+  pcm: Buffer;
+  sampleRate: number;
+  /** Exact duration, derived from the byte count rather than estimated. */
+  seconds: number;
+  model: string;
+  voice: string;
+}
+
+/**
+ * Speak a line of narration.
+ *
+ * The provider returns raw PCM rather than an encoded file, which is what makes
+ * subtitle timing honest: the duration follows from the byte count exactly, so
+ * captions align to the audio that was actually produced instead of to a
+ * words-per-minute guess.
+ */
+export async function synthesizeSpeech(text: string, voice = 'Kore'): Promise<SpeechResult> {
+  const ai = client();
+  const spoken = text.trim();
+  if (!spoken) throw new ProviderError('Nothing to speak.', 'invalid_output');
+
+  const chain = ttsChain();
+  let lastError: ProviderError | undefined;
+
+  for (let attempt = 0; attempt < Math.max(chain.length * 2, 2); attempt++) {
+    const model = chain[attempt % chain.length];
+    try {
+      const response = await ai.models.generateContent({
+        model,
+        contents: spoken,
+        config: {
+          responseModalities: ['AUDIO'],
+          speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: voice } } },
+        },
+      });
+
+      const inline = response.candidates?.[0]?.content?.parts?.[0]?.inlineData;
+      if (!inline?.data) {
+        throw new ProviderError('The speech model returned no audio.', 'invalid_output', true);
+      }
+
+      const pcm = Buffer.from(inline.data, 'base64');
+      // The mime type carries the rate, e.g. "audio/L16;codec=pcm;rate=24000".
+      const sampleRate = Number(inline.mimeType?.match(/rate=(\d+)/)?.[1] ?? 24000);
+
+      return {
+        pcm,
+        sampleRate,
+        seconds: pcm.length / 2 / sampleRate,
+        model,
+        voice,
+      };
+    } catch (err) {
+      const error = toProviderError(err);
+      const worthRetrying = TRANSIENT_CODES.has(error.code) || error.code === 'bad_model';
+      if (!worthRetrying || attempt === Math.max(chain.length * 2, 2) - 1) throw error;
+      lastError = error;
+      if ((attempt + 1) % chain.length === 0) await sleep(2000);
+    }
+  }
+
+  throw lastError ?? new ProviderError('Speech synthesis failed.', 'upstream', true);
+}
+
 export async function transcribeMedia(
   base64: string,
   mimeType: string,
