@@ -189,13 +189,23 @@ const DETAIL_NOTE =
  * can grow without breaking the format.
  */
 const DETAIL_BY_FORMAT: Partial<Record<FormatId, Record<string, string>>> = {
+  // A ceiling, not a quota. Written first as "produce 3 to 5 posts", which
+  // overrode this format's own rule that one post is right when the message
+  // fits in one, and turned every short item into a five-post thread whether
+  // it needed one or not. Detail decides how much room the thread may take;
+  // whether it needs a thread at all stays the model's judgement.
   x_thread: {
-    Brief: 'Produce 1 to 2 posts in total.',
-    Standard: 'Produce 3 to 5 posts in total.',
+    Brief:
+      'Aim for a single post. If the essentials will not fit inside the character limit, use 2 ' +
+      'posts rather than exceeding it: the limit is never negotiable, and one over-long post is ' +
+      'the one outcome that is always wrong here.',
+    Standard:
+      'Use a single post when the message fits in one, and set isThread to false when it does. ' +
+      'Thread only when one post cannot carry the essentials, and then use about 4.',
     Detailed:
-      'Produce 6 to 9 posts in total, and set isThread to true. Every post must still stay ' +
-      'under the character limit: more detail means more posts, never longer posts. If a post ' +
-      'is running long, split it into two.',
+      'Cover the material fully. Use a single post if that is genuinely enough; where it is not, ' +
+      'thread up to about 8 posts. Every post must stay under the character limit: more detail ' +
+      'means more posts, never longer posts. If a post is running long, split it in two.',
   },
 };
 
