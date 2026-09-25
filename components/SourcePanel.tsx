@@ -58,7 +58,10 @@ export function SourcePanel({
           Replace
         </Button>
       }
-      className="lg:h-[calc(100vh-80px)]"
+      // A height at every width, not only at lg. Without one on a phone the
+      // panel grew to the length of the whole document, its internal scroll
+      // never engaged, and the outputs sat 2,450px down the page.
+      className="h-[55vh] lg:h-[calc(100vh-80px)]"
       bodyClassName="flex min-h-0 flex-col"
     >
       {source.warnings.length > 0 && (
