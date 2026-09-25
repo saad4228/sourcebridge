@@ -102,6 +102,112 @@ ${facts}${section('Document-level caveats (these must survive into every output)
 === END FACT LEDGER ===`;
 }
 
+/**
+ * What each brief setting should actually do to the output.
+ *
+ * The settings used to be passed as bare labels -- "Detail level: Detailed" --
+ * leaving the model to infer what that meant. Measured against the same
+ * source, "Detailed" then produced slightly *fewer* words than "Brief": the
+ * control moved nothing. A dropdown that does not steer the output is worse
+ * than no dropdown, because the operator believes they steered it.
+ *
+ * Unlisted values still reach the model as a plain label, so the lists in the
+ * interface can grow without changing this file.
+ */
+const AUDIENCE_GUIDANCE: Record<string, string> = {
+  'General public': 'Assume no background. Explain any term the source takes for granted. Lead with what it means for ordinary people and what, if anything, they should do.',
+  Leadership: 'Lead with the decision at stake and its consequences. State impact, risk and what needs approving. Omit implementation detail.',
+  'Government officials': 'Lead with the finding and its policy implications. Be precise about scope, jurisdiction and what is and is not established.',
+  Employees: 'Lead with what changes for them and what is expected of them. Practical and specific, not promotional.',
+  'Technical professionals': 'Assume domain fluency. Keep mechanism, method, figures and limitations. Do not simplify terminology.',
+  Researchers: 'Foreground method, evidence and limitations. Be explicit about what the data does and does not support.',
+  Students: 'Explain the reasoning, not just the conclusion. Introduce each term the first time it appears.',
+};
+
+const OBJECTIVE_GUIDANCE: Record<string, string> = {
+  Inform: 'State what happened and what is known. Do not argue a position.',
+  Explain: 'Make the mechanism understandable: why this happened, not only that it did.',
+  Educate: 'Build understanding step by step, defining terms as they arise.',
+  Warn: 'Lead with the risk, who is exposed, and the protective action. Do not overstate certainty to make the warning land.',
+  'Recommend action': 'Lead to a clear recommendation, with the reasoning that supports it and what it depends on.',
+  'Raise awareness': 'Make the issue memorable and shareable without dramatising beyond the source.',
+  Promote: 'Emphasise genuine strengths that the source supports. Never invent a benefit.',
+  'Support a decision': 'Lay out options, what each depends on, and what the evidence supports. Do not hide the uncertainty.',
+};
+
+const TONE_GUIDANCE: Record<string, string> = {
+  Professional: 'Measured and businesslike. No slang, no exclamation.',
+  Neutral: 'Plain and even. Let the facts carry the weight.',
+  Accessible: 'Conversational and welcoming. Short sentences, everyday words.',
+  Simple: 'Short sentences. Common words only. One idea per sentence.',
+  Technical: 'Precise and specific. Use the correct term rather than an approachable one.',
+  Educational: 'Patient and explanatory, building from what the reader already knows.',
+  Persuasive: 'Make the case directly, but only on what the source supports.',
+  Formal: 'Impersonal register, full forms rather than contractions, no colloquialism.',
+};
+
+/**
+ * Detail is the setting that was doing nothing, so it is the most explicit:
+ * a length instruction the model can act on, not an adjective.
+ */
+const DETAIL_GUIDANCE: Record<string, string> = {
+  Brief:
+    'Use 2 to 3 items in each list field and 1 to 2 sentences in each prose field. ' +
+    'Keep only the central finding, the figures that carry it, and the limitations that ' +
+    'qualify it. Cut background entirely.',
+  Standard:
+    'Use 3 to 4 items in each list field and 2 to 3 sentences in each prose field. ' +
+    'Cover the main points with enough context to stand alone.',
+  Detailed:
+    'Use 5 to 7 items in each list field and 4 to 6 sentences in each prose field. ' +
+    'Include supporting context, the sequence of events or method, secondary figures, and ' +
+    'every limitation the source states. Populate optional fields the schema offers. Add ' +
+    'substance from the source rather than padding with repetition.',
+};
+
+/** Counts the format's own rules override, since those protect the layout. */
+/**
+ * Detail must never push a field past a limit the format sets.
+ *
+ * The first version of this said only that the format's limit "wins", which
+ * was too soft: asked for detail, the model wrote a 986-character post into a
+ * field capped at 280. Length now scales by adding list items, never by
+ * overrunning a field that states a maximum.
+ */
+const DETAIL_NOTE =
+  'This must NEVER push a field past a character or item limit stated for this format. ' +
+  'Those limits are absolute. Where a field is capped, add detail by using more list items ' +
+  'rather than by writing more in that field.';
+
+/**
+ * Detail for formats whose fields carry a hard cap.
+ *
+ * A generic "write more in each field" instruction is actively wrong where a
+ * field has a maximum: asked for detail, the model put 771 characters into a
+ * post limited to 280 rather than splitting the thread. For these formats
+ * detail scales the number of items instead, which is the only direction that
+ * can grow without breaking the format.
+ */
+const DETAIL_BY_FORMAT: Partial<Record<FormatId, Record<string, string>>> = {
+  x_thread: {
+    Brief: 'Produce 1 to 2 posts in total.',
+    Standard: 'Produce 3 to 5 posts in total.',
+    Detailed:
+      'Produce 6 to 9 posts in total, and set isThread to true. Every post must still stay ' +
+      'under the character limit: more detail means more posts, never longer posts. If a post ' +
+      'is running long, split it into two.',
+  },
+};
+
+/** The detail instruction for this format: the capped variant where one exists. */
+function detailInstruction(format: FormatId, detail: string): string {
+  const specific = DETAIL_BY_FORMAT[format]?.[detail];
+  if (specific) return specific;
+  return `${DETAIL_GUIDANCE[detail] ?? ''} ${DETAIL_NOTE}`.trim();
+}
+
+const guide = (map: Record<string, string>, value: string) => (map[value] ? ` — ${map[value]}` : '');
+
 /** Render the operator's communication brief. */
 function renderBrief(brief: GenerationBrief): string {
   const optional: string[] = [];
@@ -113,11 +219,14 @@ function renderBrief(brief: GenerationBrief): string {
   if (brief.avoidClaims?.trim()) optional.push(`Claims to avoid: ${brief.avoidClaims.trim()}`);
 
   return `=== COMMUNICATION BRIEF ===
-Audience: ${brief.audience}
-Objective: ${brief.objective}
-Tone: ${brief.tone}
-Language: ${brief.language}
-Detail level: ${brief.detail}${optional.length ? `\n${optional.join('\n')}` : ''}
+These settings are instructions, not labels. Two outputs from the same source
+under different settings should read differently.
+
+Audience: ${brief.audience}${guide(AUDIENCE_GUIDANCE, brief.audience)}
+Objective: ${brief.objective}${guide(OBJECTIVE_GUIDANCE, brief.objective)}
+Tone: ${brief.tone}${guide(TONE_GUIDANCE, brief.tone)}
+Language: ${brief.language} — write every field in this language, including headings and labels. Keep figures, units, dates and proper names in their original form.
+Detail level: ${brief.detail}${guide(DETAIL_GUIDANCE, brief.detail)}${optional.length ? `\n${optional.join('\n')}` : ''}
 === END BRIEF ===`;
 }
 
@@ -138,7 +247,9 @@ Hashtags are optional and must be relevant, not generic filler.`,
 Set isThread to false and return exactly one post when the message genuinely fits in one.
 When threading, the first post must earn the read and the last must land the takeaway.
 Do not number posts inside the text; ordering is handled by the application.
-Do not drop the source's qualifications just to save characters.`,
+Do not drop the source's qualifications just to save characters.
+A higher detail level means MORE posts in the thread, never longer posts. The character
+limit applies to every post whatever detail level was requested.`,
 
   advisory: `Write a formal advisory. Neutral, precise, no persuasion.
 Include the issuing organisation, dates or contact details ONLY if they appear in the source.
@@ -276,6 +387,8 @@ ${renderLedger(ledger)}
 ${renderSource(source)}
 
 Produce the ${label} as JSON. Use the fact ledger for consistency across formats, and the source
-segments for evidence IDs and exact wording of figures.`,
+segments for evidence IDs and exact wording of figures.
+
+Detail level is ${brief.detail}: ${detailInstruction(format, brief.detail)}`,
   };
 }
