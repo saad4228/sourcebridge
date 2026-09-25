@@ -70,11 +70,24 @@ export function Landing({
             const file = e.dataTransfer.files?.[0];
             if (file) onExtractPdf(file);
           }}
+          onClick={(e) => {
+            if (busy) return;
+            // The zone holds its own buttons and inputs. A click that landed on
+            // one of those is that control's click, not the zone's, and opening
+            // the file picker as well would fight whatever the operator meant.
+            if ((e.target as HTMLElement).closest('button, a, input, textarea, select')) return;
+            fileInput.current?.click();
+          }}
           className={cx(
             'rounded-xl border-2 border-dashed px-6 py-10 text-center transition-colors',
+            // Deliberately not role="button" with a tabIndex: a button may not
+            // contain other buttons, and this one holds several. The "Choose a
+            // file" button below stays the keyboard and screen-reader path;
+            // clicking the zone is a mouse shortcut on top of it.
+            !busy && 'cursor-pointer',
             dragging
               ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)]'
-              : 'border-[var(--color-rule-strong)] bg-[var(--color-surface)]',
+              : 'border-[var(--color-rule-strong)] bg-[var(--color-surface)] hover:border-[var(--color-accent)]',
           )}
         >
           {busy ? (
@@ -99,7 +112,7 @@ export function Landing({
                 <path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
               </svg>
               <p className="text-base font-semibold text-[var(--color-ink)]">
-                Drop a PDF, image or video here, or start from the sample
+                Click to choose a file, drop one here, or start from the sample
               </p>
               <p className="mx-auto mt-1.5 max-w-md text-xs leading-relaxed text-[var(--color-ink-faint)]">
                 Text-based PDF up to {LIMITS.maxPdfBytes / 1024 / 1024} MB, or an image (PNG, JPEG, WebP) up to{' '}

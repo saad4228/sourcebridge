@@ -352,7 +352,18 @@ function XThreadPreview({ content, editing, onChange, onEvidence }: PreviewProps
         );
       })}
       <div className="flex justify-center">
-        <PostButton label="Post on X" format="x_thread" onShare={() => shareToX(content)} />
+        {/*
+          One button, not two. X and Twitter are the same service: twitter.com
+          redirects to x.com and both intent URLs open the same composer, so a
+          second button would send the operator to exactly the same place. The
+          old name is kept in the label because that is still what many people
+          call it.
+        */}
+        <PostButton
+          label="Post on X (Twitter)"
+          format="x_thread"
+          onShare={() => shareToX(content)}
+        />
       </div>
       <p className="text-center text-[11px] text-[var(--color-ink-faint)]">
         {content.posts.length > 1
