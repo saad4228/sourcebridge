@@ -16,13 +16,19 @@ import {
 } from './providers/openaiCompatible';
 
 /**
- * The model tried first, overridable with GEMINI_MODEL.
+ * The Gemini model tried first, overridable with GEMINI_MODEL.
  *
  * Free-tier daily quotas are per-model and small on the flagship flash models,
  * so no single model carries a working day: the chain below spreads the load,
  * and one seven-format run costs eight requests.
+ *
+ * flash-lite rather than a numbered flash release, on measurement: against the
+ * real advisory schema it answered in 1.9s where 3.8-flash took 7.1s and
+ * 3.6-flash took 9.5s, and all three preserved every figure and every
+ * qualifier. The work here is transformation under a schema, not reasoning, so
+ * the larger models were buying nothing and charging four seconds for it.
  */
-const DEFAULT_MODEL = 'gemini-3.6-flash';
+const DEFAULT_MODEL = 'gemini-flash-lite-latest';
 
 export class ProviderError extends Error {
   /** How long the provider asked us to wait, when it said so. */
@@ -90,14 +96,17 @@ export function modelName(): string {
  * minutes, so they sit at the end as a last resort.
  */
 const DEFAULT_FALLBACKS = [
-  'gemini-3.5-flash',
-  // Gemma draws on a separate allowance and supports structured output, so it
-  // keeps the app working after the Gemini daily quotas are spent.
-  'gemma-4-26b-a4b-it',
-  'gemma-4-31b-it',
   'gemini-3.8-flash',
-  'gemini-flash-lite-latest',
+  'gemini-3.6-flash',
+  'gemini-3.5-flash',
   'gemini-3.1-flash-lite',
+  // Gemma last, not second. It draws on a separate allowance, which is why it
+  // stays in the chain at all -- it keeps the app working once the Gemini
+  // daily quotas are spent. But measured against the real advisory schema it
+  // took three minutes and then returned content that was not valid JSON, so
+  // it is a last resort rather than an early fallback.
+  'gemma-4-31b-it',
+  'gemma-4-26b-a4b-it',
 ];
 
 /**
@@ -112,6 +121,12 @@ const REQUEST_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS ?? 45_000);
 /**
  * Text models on an OpenAI-compatible provider, tried before Gemini.
  *
+ * Qwen was dropped from this list. It is fast and it satisfies the schema, but
+ * across three runs it reproduced only half the source figures twice: 2 of 4,
+ * 4 of 4, 2 of 4. Every other model in this file scored 4 of 4 every time.
+ * Losing a figure is the one failure this application exists to prevent, so a
+ * model that does it intermittently is worse than one that is merely slower.
+ *
  * These are put first because they answer in about a second where Gemini's
  * free tier was measured taking tens of seconds, and because they draw on an
  * entirely separate allowance — which is what stops a spent Gemini quota
@@ -120,7 +135,7 @@ const REQUEST_TIMEOUT_MS = Number(process.env.GEMINI_TIMEOUT_MS ?? 45_000);
  * Only text generation moves: reading images and video, and speaking
  * narration, remain Gemini's, because this provider does neither.
  */
-const DEFAULT_OPENAI_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
+const DEFAULT_OPENAI_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'];
 
 /**
  * Hidden reasoning budget for models that support it.

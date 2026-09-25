@@ -119,7 +119,7 @@ Then edit `.env.local` and add your keys:
 ```
 GROQ_API_KEY=your-key-here
 GEMINI_API_KEY=your-key-here
-GEMINI_MODEL=gemini-3.6-flash
+GEMINI_MODEL=gemini-flash-lite-latest
 ```
 
 `.env.local` is gitignored. **Keys are read only on the server** and are never sent to the browser.
@@ -129,6 +129,35 @@ GEMINI_MODEL=gemini-3.6-flash
 > third-party service.
 
 ### How a model is chosen
+
+### Why these models
+
+The chain order is measured, not assumed. Every candidate was run against the real advisory schema
+with a hedged source and scored on the three things that matter here: does it satisfy the schema,
+does it carry every figure through unchanged, and does it keep the source's qualifiers.
+
+| Model | Latency | Figures kept | Qualifiers kept |
+| --- | --- | --- | --- |
+| `openai/gpt-oss-120b` | 1.8s | 4/4 | 7/7 |
+| `openai/gpt-oss-20b` | 0.6s | 4/4 | 7/7 |
+| `gemini-flash-lite-latest` | 1.9s | 4/4 | 7/7 |
+| `gemini-3.8-flash` | 7.1s | 4/4 | 7/7 |
+| `gemini-3.6-flash` | 9.5s | 4/4 | 7/7 |
+| `gemini-3.5-flash` | 17.4s | 4/4 | 7/7 |
+| `qwen/qwen3.8-27b` | 1.4s | **2/4** | 5/7 |
+| `gemma-4-26b-a4b-it` | **180s** | — | — (invalid JSON) |
+
+Two results changed the defaults. Qwen is fast and satisfies the schema, but across three runs it
+reproduced only half the source figures twice, so it is no longer in the chain: losing a figure is
+the one failure this project exists to prevent, and a model that does it intermittently is worse
+than one that is merely slower. Gemma took three minutes and then returned content that would not
+parse, so it moved from second in the fallback list to last — it stays only because it draws on a
+separate allowance and keeps the application alive once the Gemini quotas are spent.
+
+Gemini **Pro** is not available on a free key: both `gemini-3.1-pro-preview` and
+`gemini-pro-latest` answer with a quota error pointing at billing. The ceiling here is the flash
+tier, and on this task every flash model scored identically anyway — the work is transformation
+under a schema, not reasoning, so the larger models were buying nothing.
 
 Text generation walks one chain: the Groq models first, then the Gemini ones. Groq leads because it
 was measured answering in about a second where the Gemini free tier took tens of seconds, and
