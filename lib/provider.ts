@@ -578,8 +578,8 @@ export async function generateJson<T>(
 
   let usedModel = modelChain()[0]?.model ?? modelName();
 
-  const call = async (prompt: string): Promise<string> => {
-    const { value, model } = await withRetry(modelChain(), (ref) =>
+  const call = async (prompt: string, chain?: ModelRef[]): Promise<string> => {
+    const { value, model } = await withRetry(chain ?? modelChain(), (ref) =>
       withDeadline(ref.model, (signal) => {
         if (ref.provider === 'openai') {
           const config = openAiConfig();
@@ -648,7 +648,13 @@ export async function generateJson<T>(
     `Problems: ${first.issues}\n` +
     `Return corrected JSON that satisfies the schema exactly. Output JSON only.`;
 
-  const second = parse(await call(repairPrompt));
+  // Repair on a different model where the chain offers one. A model that has
+  // just produced output its own schema rejects is the least likely to fix it,
+  // and this is how a format could fail outright while a model that handles
+  // the schema perfectly well sat unused: a schema failure is not an error the
+  // provider reports, so the usual rotation never got a chance to happen.
+  const others = modelChain().filter((ref) => ref.model !== usedModel);
+  const second = parse(await call(repairPrompt, others.length > 0 ? others : undefined));
   if (second.ok) {
     return { data: second.value, repaired: true, latencyMs: Date.now() - started, model: usedModel };
   }
