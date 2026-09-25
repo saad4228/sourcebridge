@@ -172,3 +172,81 @@ describe('word matching', () => {
     ).toHaveLength(0);
   });
 });
+
+describe('negation', () => {
+  it('does not read "not verified" as a claim that it was verified', () => {
+    // This reached the findings panel: a slide correctly reporting that
+    // attribution was not verified was flagged for saying "verified".
+    const findings = run({
+      body: 'Attribution has not been independently verified.',
+      evidence: ['seg-attrib'],
+    });
+
+    expect(findings.filter((f) => f.type === 'meaning_drift')).toHaveLength(0);
+  });
+
+  it('handles the other negated forms', () => {
+    for (const body of [
+      'Attribution was never confirmed.',
+      'No actor has been confirmed.',
+      "Attribution hasn't been confirmed.",
+      'Published without confirmed attribution.',
+    ]) {
+      expect(types({ body, evidence: ['seg-attrib'] })).not.toContain('meaning_drift');
+    }
+  });
+
+  it('still catches the escalation when it really is asserted', () => {
+    // The fix must not blunt the check it protects.
+    expect(
+      types({ body: 'Attribution has been confirmed.', evidence: ['seg-attrib'] }),
+    ).toContain('meaning_drift');
+  });
+
+  it('catches an assertion elsewhere in a sentence that also negates', () => {
+    // "confirmed" here is asserted despite the earlier negation.
+    expect(
+      types({
+        body: 'The outage was not brief; attribution is confirmed.',
+        evidence: ['seg-attrib'],
+      }),
+    ).toContain('meaning_drift');
+  });
+});
+
+describe('finding volume', () => {
+  it('reports every dropped family in one finding, not one each', () => {
+    const findings = run({
+      body: '68% of systems were restored.',
+      evidence: ['seg-prelim'],
+    });
+    const dropped = findings.filter((f) => f.type === 'qualifier_dropped');
+
+    // Three near-identical rows push the specific escalation out of view.
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0].message).toContain('preliminary');
+    expect(dropped[0].message).toContain('approximately');
+  });
+
+  it('keeps the singular reading when only one family is missing', () => {
+    // seg-attrib carries one hedge family; seg-prelim carries two.
+    const findings = run({ body: 'Attribution was discussed at length.', evidence: ['seg-attrib'] });
+    const dropped = findings.filter((f) => f.type === 'qualifier_dropped');
+
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0].message).toMatch(/That qualifier does not appear/);
+    expect(dropped[0].message).toMatch(/Confirm it still applies/);
+  });
+
+  it('carries the evidence of every claim that dropped something', () => {
+    const findings = run({
+      items: [
+        { body: '68% were restored.', evidence: ['seg-prelim'] },
+        { body: 'Infrastructure was affected.', evidence: ['seg-partial'] },
+      ],
+    });
+    const dropped = findings.find((f) => f.type === 'qualifier_dropped');
+
+    expect(dropped?.refs).toEqual(expect.arrayContaining(['seg-prelim', 'seg-partial']));
+  });
+});

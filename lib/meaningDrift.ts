@@ -89,10 +89,37 @@ const ESCALATIONS: { weak: string[]; strong: string[]; note: string }[] = [
   },
 ];
 
+const escapeTerm = (term: string) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /** Whole-word (or whole-phrase) match, so "may" does not match "maybe". */
 function contains(haystack: string, term: string): boolean {
-  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(^|[^a-z])${escaped}([^a-z]|$)`, 'i').test(haystack);
+  return new RegExp(`(^|[^a-z])${escapeTerm(term)}([^a-z]|$)`, 'i').test(haystack);
+}
+
+/**
+ * A negation shortly before the term, which reverses what it asserts.
+ *
+ * Allows a few words in between so "has not been independently verified" and
+ * "was never fully confirmed" are both caught.
+ */
+const NEGATED_BEFORE =
+  /\b(?:not|never|no|nor|cannot|can not|without|un)\s*(?:\w+\s+){0,3}$|\b(?:isn't|aren't|wasn't|weren't|hasn't|haven't|hadn't|doesn't|didn't|don't)\s+(?:\w+\s+){0,3}$/i;
+
+/**
+ * Whole-word match, but only where the term is actually being asserted.
+ *
+ * Used for the strong half of an escalation. Without this, a slide that
+ * faithfully reports "attribution has not been independently verified" was
+ * flagged for saying "verified" -- the exact opposite of what it said, and the
+ * kind of false positive that teaches a reviewer to ignore the whole check.
+ */
+function containsAffirmed(haystack: string, term: string): boolean {
+  const re = new RegExp(`(^|[^a-z])(${escapeTerm(term)})([^a-z]|$)`, 'gi');
+  for (const match of haystack.matchAll(re)) {
+    const before = haystack.slice(0, (match.index ?? 0) + match[1].length);
+    if (!NEGATED_BEFORE.test(before)) return true;
+  }
+  return false;
 }
 
 /** A block of output text together with the source passages it cites. */
@@ -160,6 +187,9 @@ export function detectMeaningDrift(options: DriftOptions): ValidationFinding[] {
   const escalations: ValidationFinding[] = [];
   const drops: ValidationFinding[] = [];
   const seenDrop = new Set<string>();
+  /** Families missing from the output, gathered into one finding at the end. */
+  const dropped: { label: string; term: string }[] = [];
+  const droppedRefs = new Set<string>();
 
   for (const claim of collectCitedClaims(content)) {
     const cited = claim.evidence
@@ -173,7 +203,9 @@ export function detectMeaningDrift(options: DriftOptions): ValidationFinding[] {
     // --- Escalation: weak in the source, strong in the output --------------
     for (const rule of ESCALATIONS) {
       const weak = rule.weak.find((t) => contains(cited, t));
-      const strong = rule.strong.find((t) => contains(output, t));
+      // Affirmed only: "not verified" is the source's own position, not a
+      // claim that it was verified.
+      const strong = rule.strong.find((t) => containsAffirmed(output, t));
       // The output must not still carry the weak form: "some may be final"
       // keeps its hedge and is not an escalation.
       if (weak && strong && !rule.weak.some((t) => contains(output, t))) {
@@ -197,16 +229,31 @@ export function detectMeaningDrift(options: DriftOptions): ValidationFinding[] {
       if (seenDrop.has(family.name)) continue;
       seenDrop.add(family.name);
 
-      drops.push({
-        type: 'qualifier_dropped',
-        severity: 'warning',
-        message:
-          `The cited passage qualifies this as ${family.label} ("${inSource}"), and that ` +
-          `qualifier does not appear in this artefact. Confirm it still applies before publishing.`,
-        field: claim.path,
-        refs: claim.evidence,
-      });
+      dropped.push({ label: family.label, term: inSource });
+      for (const id of claim.evidence) droppedRefs.add(id);
     }
+  }
+
+  // One finding, not one per family. Three near-identical rows saying a
+  // qualifier is missing push the specific, high-confidence escalation out of
+  // view, which is the finding that actually needs reading.
+  if (dropped.length > 0) {
+    const listed = dropped.map((d) => `${d.label} ("${d.term}")`);
+    const phrase =
+      listed.length === 1
+        ? listed[0]
+        : `${listed.slice(0, -1).join(', ')} and ${listed[listed.length - 1]}`;
+
+    drops.push({
+      type: 'qualifier_dropped',
+      severity: 'warning',
+      message:
+        `The source qualifies this as ${phrase}. ` +
+        `${dropped.length === 1 ? 'That qualifier does' : 'Those qualifiers do'} not appear in ` +
+        `this artefact. Confirm ${dropped.length === 1 ? 'it still applies' : 'they still apply'} ` +
+        `before publishing.`,
+      refs: [...droppedRefs],
+    });
   }
 
   // Escalations first: they are the specific, high-confidence finding.
