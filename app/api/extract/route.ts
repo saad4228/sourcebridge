@@ -98,7 +98,18 @@ export async function POST(request: Request) {
       );
     }
 
-    const body = (await request.json()) as { text?: string; title?: string; url?: string };
+    // A body that will not parse is the caller's mistake, not a server fault.
+    // Letting it reach the catch-all below reported 500 and logged a stack
+    // trace for what is simply a malformed request.
+    let body: { text?: string; title?: string; url?: string };
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      throw new ExtractionError(
+        'No source was received. Upload a file, or send text or a URL.',
+        'invalid_input',
+      );
+    }
 
     if (body.url?.trim()) {
       const article = await fetchArticle(body.url.trim());

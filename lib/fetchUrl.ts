@@ -80,6 +80,48 @@ function blocksToText(html: string): string {
   return lines.filter((line, i) => line !== lines[i - 1]).join('\n');
 }
 
+/**
+ * Read a response body, giving up as soon as it exceeds the cap.
+ *
+ * Buffering the whole body and checking its length afterwards meant a hostile
+ * or merely broken endpoint could hold arbitrary memory on the server before
+ * the size limit was ever consulted: the check ran after the damage. The
+ * declared length is honoured when present, but it is a claim the server makes
+ * about itself, so the running total is what actually enforces the limit.
+ */
+async function readCapped(response: Response, maxBytes: number): Promise<string> {
+  const tooLarge = () =>
+    new UrlFetchError(`The page is larger than ${maxBytes / 1024 / 1024} MB.`, 'unusable');
+
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > maxBytes) throw tooLarge();
+
+  const reader = response.body?.getReader();
+  if (!reader) return '';
+
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) throw tooLarge();
+      chunks.push(value);
+    }
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+
+  const merged = new Uint8Array(total);
+  let at = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return new TextDecoder('utf-8').decode(merged);
+}
+
 export interface FetchedArticle {
   title: string;
   text: string;
@@ -146,15 +188,7 @@ export async function fetchArticle(raw: string): Promise<FetchedArticle> {
     );
   }
 
-  const buffer = await response.arrayBuffer();
-  if (buffer.byteLength > URL_LIMITS.maxBytes) {
-    throw new UrlFetchError(
-      `The page is larger than ${URL_LIMITS.maxBytes / 1024 / 1024} MB.`,
-      'unusable',
-    );
-  }
-
-  const html = new TextDecoder('utf-8').decode(buffer);
+  const html = await readCapped(response, URL_LIMITS.maxBytes);
   const { document } = parseHTML(html);
   const documentTitle = document.querySelector('title')?.textContent?.trim() ?? '';
 

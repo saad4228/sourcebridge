@@ -156,6 +156,10 @@ export function Landing({
                 ref={fileInput}
                 type="file"
                 accept="application/pdf,.pdf,image/png,image/jpeg,image/webp,video/mp4,video/webm,video/quicktime"
+                // Visually hidden but still reachable by a screen reader, so it
+                // needs a name of its own: without one it announces as an
+                // unlabelled file control sitting among the visible buttons.
+                aria-label="Choose a source file to upload"
                 className="sr-only"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
