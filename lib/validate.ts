@@ -8,6 +8,7 @@
  */
 
 import type { FormatId, Source, ValidationFinding } from './types';
+import { detectMeaningDrift } from './meaningDrift';
 import { X_POST_CHAR_LIMIT } from './schemas';
 import { resolveLayout } from './export/slideLayout';
 import { resolveInfographicLayout } from './export/infographicLayout';
@@ -258,6 +259,14 @@ export function validateArtifact(options: ValidateOptions): ValidationFinding[] 
           `or an error. Check before publishing.`,
       });
     }
+  }
+
+  // --- Meaning drift -------------------------------------------------------
+  // The numeric check above catches a figure that changed. This catches a
+  // figure that stayed while the certainty around it did not, which is the
+  // failure the numeric check is structurally unable to see.
+  if (grounded && source) {
+    findings.push(...detectMeaningDrift({ content, source }));
   }
 
   // --- Format-specific structural checks -----------------------------------

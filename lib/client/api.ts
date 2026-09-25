@@ -211,9 +211,14 @@ export interface ExportInput {
 
 export interface BundleInput {
   kind: 'bundle';
-  items: { format: FormatId; content: unknown }[];
+  items: { format: FormatId; content: unknown; model?: string }[];
   sourceTitle: string | null;
   brief?: GenerationBrief;
+  /** What the artefacts were derived from, sealed into the archive's hash chain. */
+  provenance?: {
+    source: { title: string; kind: string; text: string } | null;
+    ledger?: unknown;
+  };
 }
 
 /** Request a file and hand it to the browser as a download. */

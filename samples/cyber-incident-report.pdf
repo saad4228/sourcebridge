@@ -1,0 +1,125 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Count 3 /Kids [5 0 R 7 0 R 9 0 R] >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Length 1785 >>
+stream
+BT /F1 15 Tf 62 782 Td (Preliminary Incident Assessment: Coordinated Service Disruption) Tj ET
+BT /F1 11 Tf 62 763 Td (Cyber Situational Awareness Unit) Tj ET
+BT /F1 10 Tf 62 748 Td (Report reference CSA-2026-0418, issued 18 September 2026) Tj ET
+BT /F1 10 Tf 62 733 Td (Distribution: official use. This assessment is preliminary.) Tj ET
+BT /F1 12 Tf 62 702 Td (1. Summary) Tj ET
+BT /F1 11 Tf 62 681 Td (Between 02:14 and 09:47 IST on 12 September 2026, a coordinated distributed) Tj ET
+BT /F1 11 Tf 62 660 Td (denial-of-service campaign caused sustained degradation of service) Tj ET
+BT /F1 11 Tf 62 639 Td (availability across 37 systems operated by 4 public-sector entities.) Tj ET
+BT /F1 11 Tf 62 618 Td (Preliminary analysis indicates that approximately 68% of the affected systems) Tj ET
+BT /F1 11 Tf 62 597 Td (were restored within the first six hours of detection. The campaign is) Tj ET
+BT /F1 11 Tf 62 576 Td (assessed as mitigated as of 14 September 2026.) Tj ET
+BT /F1 12 Tf 62 545 Td (2. Background) Tj ET
+BT /F1 11 Tf 62 524 Td (The affected entities operate citizen-facing service portals hosted across two) Tj ET
+BT /F1 11 Tf 62 503 Td (regional data centres. Baseline aggregate load across the monitored estate) Tj ET
+BT /F1 11 Tf 62 482 Td (averages 14,200 requests per second during business hours. Automated) Tj ET
+BT /F1 11 Tf 62 461 Td (volumetric alerting was in place at 3 of the 4 entities at the time of the) Tj ET
+BT /F1 11 Tf 62 440 Td (incident.) Tj ET
+BT /F1 11 Tf 62 415 Td (An unrelated maintenance window was in progress at one entity between 01:00) Tj ET
+BT /F1 11 Tf 62 390 Td (and 03:00 IST on 12 September 2026. Some telemetry from that window may be) Tj ET
+BT /F1 11 Tf 62 365 Td (incomplete, and the assessment below treats it accordingly.) Tj ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 4 0 R >>
+endobj
+6 0 obj
+<< /Length 2267 >>
+stream
+BT /F1 12 Tf 62 782 Td (3. Observed impact) Tj ET
+BT /F1 10 Tf 62 759 Td (Metric) Tj ET
+BT /F1 10 Tf 312 759 Td (Baseline) Tj ET
+BT /F1 10 Tf 407 759 Td (Incident peak) Tj ET
+BT /F1 10 Tf 517 759 Td (Change) Tj ET
+BT /F1 10 Tf 62 744 Td (Aggregate requests per second) Tj ET
+BT /F1 10 Tf 312 744 Td (14,200) Tj ET
+BT /F1 10 Tf 407 744 Td (186,400) Tj ET
+BT /F1 10 Tf 517 744 Td (+1,212%) Tj ET
+BT /F1 10 Tf 62 729 Td (Peak volumetric load \(Gbps\)) Tj ET
+BT /F1 10 Tf 312 729 Td (2.1) Tj ET
+BT /F1 10 Tf 407 729 Td (486) Tj ET
+BT /F1 10 Tf 517 729 Td (+483.9) Tj ET
+BT /F1 10 Tf 62 714 Td (Distinct source addresses) Tj ET
+BT /F1 10 Tf 312 714 Td (n/a) Tj ET
+BT /F1 10 Tf 407 714 Td (12,400) Tj ET
+BT /F1 10 Tf 517 714 Td (n/a) Tj ET
+BT /F1 10 Tf 62 699 Td (Systems degraded) Tj ET
+BT /F1 10 Tf 312 699 Td (0) Tj ET
+BT /F1 10 Tf 407 699 Td (37) Tj ET
+BT /F1 10 Tf 517 699 Td (+37) Tj ET
+BT /F1 10 Tf 62 684 Td (Mean time to restore \(hours\)) Tj ET
+BT /F1 10 Tf 312 684 Td (n/a) Tj ET
+BT /F1 10 Tf 407 684 Td (6.2) Tj ET
+BT /F1 10 Tf 517 684 Td (n/a) Tj ET
+BT /F1 12 Tf 62 653 Td (4. Attack characteristics) Tj ET
+BT /F1 11 Tf 62 632 Td (Traffic was predominantly UDP reflection with a smaller volume of) Tj ET
+BT /F1 11 Tf 62 611 Td (application-layer requests against authentication endpoints. Peak volumetric) Tj ET
+BT /F1 11 Tf 62 590 Td (load measured 486 Gbps. Traffic originated from approximately 12,400 distinct) Tj ET
+BT /F1 11 Tf 62 569 Td (source addresses across 31 countries. Attribution to any specific actor) Tj ET
+BT /F1 11 Tf 62 548 Td (remains unconfirmed.) Tj ET
+BT /F1 11 Tf 62 523 Td (Indicators of compromise have been circulated separately. No evidence of data) Tj ET
+BT /F1 11 Tf 62 498 Td (exfiltration has been identified to date; this does not by itself establish) Tj ET
+BT /F1 11 Tf 62 473 Td (that none occurred, as log retrieval at two entities is still in progress.) Tj ET
+BT /F1 12 Tf 62 442 Td (5. Estimated cost) Tj ET
+BT /F1 11 Tf 62 421 Td (The estimated financial impact is Rs 12.4 crore, comprising service) Tj ET
+BT /F1 11 Tf 62 400 Td (unavailability, incident response effort and emergency mitigation capacity.) Tj ET
+BT /F1 11 Tf 62 379 Td (This figure is an initial projection and has not been independently audited.) Tj ET
+endstream
+endobj
+7 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 6 0 R >>
+endobj
+8 0 obj
+<< /Length 1449 >>
+stream
+BT /F1 12 Tf 62 782 Td (6. Limitations) Tj ET
+BT /F1 11 Tf 62 761 Td (This assessment is preliminary and is based on telemetry available as of 17) Tj ET
+BT /F1 11 Tf 62 740 Td (September 2026. Some affected entities had not completed log retrieval at the) Tj ET
+BT /F1 11 Tf 62 719 Td (time of writing, so the figures above may be revised.) Tj ET
+BT /F1 11 Tf 62 694 Td (The restoration figure of approximately 68% is derived from entity) Tj ET
+BT /F1 11 Tf 62 669 Td (self-reporting and has not been independently verified against system) Tj ET
+BT /F1 11 Tf 62 644 Td (telemetry.) Tj ET
+BT /F1 11 Tf 62 619 Td (Attribution remains unconfirmed. Source addresses observed in reflection) Tj ET
+BT /F1 11 Tf 62 594 Td (traffic do not identify an originating actor, and no claim of responsibility) Tj ET
+BT /F1 11 Tf 62 569 Td (has been assessed as credible.) Tj ET
+BT /F1 11 Tf 62 544 Td (The count of 37 affected systems covers the monitored estate only. Systems) Tj ET
+BT /F1 11 Tf 62 519 Td (outside central monitoring may have been affected without being recorded here.) Tj ET
+BT /F1 12 Tf 62 488 Td (7. Recommended actions) Tj ET
+BT /F1 11 Tf 62 467 Td (Extend automated volumetric alerting to the remaining entity. Complete log) Tj ET
+BT /F1 11 Tf 62 446 Td (retrieval at the two outstanding entities before this assessment is finalised.) Tj ET
+BT /F1 11 Tf 62 425 Td (Review upstream scrubbing capacity against the observed 486 Gbps peak.) Tj ET
+endstream
+endobj
+9 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R >> >> /Contents 8 0 R >>
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000127 00000 n 
+0000000224 00000 n 
+0000002061 00000 n 
+0000002187 00000 n 
+0000004506 00000 n 
+0000004632 00000 n 
+0000006133 00000 n 
+trailer
+<< /Size 10 /Root 1 0 R >>
+startxref
+6259
+%%EOF

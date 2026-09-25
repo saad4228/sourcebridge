@@ -109,7 +109,7 @@ export function Landing({
 
               <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
                 <Button variant="primary" onClick={() => onLoadSample('report')}>
-                  Try the sample report
+                  Try the sample incident report
                 </Button>
                 <Button variant="secondary" onClick={() => onLoadSample('image')}>
                   Try a news image
@@ -253,7 +253,7 @@ export function Landing({
               value={creative}
               onChange={(e) => setCreative(e.target.value)}
               rows={4}
-              placeholder="A campaign announcing a new rainwater harvesting scheme for residents…"
+              placeholder="A public advisory on staying safe during a service outage…"
               className="mt-2 w-full resize-y rounded-md border border-[var(--color-rule-strong)] bg-[var(--color-surface)] p-3 text-sm leading-relaxed outline-none focus:border-[var(--color-accent)]"
             />
             <div className="mt-2 flex justify-end">

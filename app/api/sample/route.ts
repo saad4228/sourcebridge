@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
 const SAMPLES = {
-  report: 'rainwater-pilot-report.pdf',
+  report: 'cyber-incident-report.pdf',
   image: 'news-clipping.png',
 } as const;
 

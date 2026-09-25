@@ -33,6 +33,14 @@ HONESTY RULES:
   re-scale or restate them.
 - Preserve qualifications and limitations. If a finding applies only to a pilot population, a
   specific period or a specific place, that restriction must survive into the output.
+- Carry the source's hedging words through into the sentence that makes the claim, not only
+  into a caveats list. If the source says "preliminary", "approximately", "estimated", "some",
+  "may", "unconfirmed" or "not independently verified", the output sentence must still say so.
+  Writing "68% were restored" where the source says "preliminary analysis indicates that
+  approximately 68% were restored" changes an assessment into a finding, and is wrong even
+  though the number is unchanged.
+- Never strengthen a claim: "some" must not become "all", "may" must not become "will", and
+  "unconfirmed" must not become "confirmed".
 - Distinguish actions the source states from suggestions you are making.
 - If the source does not support something the format normally needs, omit it rather than
   fabricating it.`;

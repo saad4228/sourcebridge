@@ -71,12 +71,16 @@ await Promise.all([worker(), worker()]);
 
 // --- 4. Fact fidelity across formats --------------------------------------
 console.log('\n=== 4. FACT FIDELITY ACROSS FORMATS ===');
-const KEY_FACTS = ['18', '250', '412', '338'];
+// Figures planted in the bundled incident report, which every format should carry
+// through unchanged. Update these together with samples/cyber-incident-report.pdf.
+const KEY_FACTS = ['37', '486', '68', '12,400', '12.4'];
 for (const [format, res] of Object.entries(results)) {
   if (res.error) continue;
   const blob = JSON.stringify(res.content);
   const hits = KEY_FACTS.filter((k) => blob.includes(k));
-  const caveat = /pilot population|do not generalise|does not generalise|not generalise|control group|pilot only|above average/i.test(blob);
+  // The qualifiers the source attaches to those figures. Losing them is the
+  // failure the numeric check above cannot see.
+  const caveat = /preliminary|approximate|approximately|estimated|unconfirmed|not been independently|self-report|may be revised|initial projection/i.test(blob);
   console.log(`  ${format.padEnd(15)} figures:[${hits.join(',')}] caveat-carried:${caveat ? 'YES' : 'no'}`);
 }
 

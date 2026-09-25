@@ -11,6 +11,7 @@ import { FORMAT_LABELS } from '../types';
 import type { FormatId, GenerationBrief } from '../types';
 import { FORMAT_SCHEMAS } from '../schemas';
 import type { Infographic, Presentation, VideoPackage } from '../schemas';
+import { buildAuditChain, renderProvenanceText } from '../audit';
 import { provenanceFooter, renderMarkdown } from './markdown';
 import { renderPresentationPptx } from './pptx';
 import { renderInfographicSvg } from './svg';
@@ -19,6 +20,8 @@ import { renderSrt, renderStoryboardCsv } from './videoPackage';
 export interface BundleItem {
   format: FormatId;
   content: unknown;
+  /** The model that produced it, recorded in the provenance chain. */
+  model?: string;
 }
 
 export interface BundleResult {
@@ -37,10 +40,17 @@ const FILE_STEM: Record<FormatId, string> = {
   video_package: 'video-package',
 };
 
+export interface BundleProvenance {
+  /** Null in creative draft mode, where there is no source to record. */
+  source: { title: string; kind: string; text: string } | null;
+  ledger?: unknown;
+}
+
 export async function renderBundle(
   items: BundleItem[],
   sourceTitle: string | null,
   brief?: GenerationBrief,
+  provenance?: BundleProvenance,
 ): Promise<BundleResult> {
   const zip = new JSZip();
   const skipped: { format: FormatId; reason: string }[] = [];
@@ -88,6 +98,21 @@ export async function renderBundle(
     }
   }
 
+  // --- Provenance ----------------------------------------------------------
+  // Written over the artefacts that were actually included, so the record
+  // describes the bundle a recipient is holding rather than what was asked for.
+  const timestamp = new Date().toISOString();
+  const chain = await buildAuditChain({
+    source: provenance?.source ?? null,
+    ledger: provenance?.ledger,
+    artifacts: items
+      .filter((item) => included.includes(item.format))
+      .map((item) => ({ format: item.format, content: item.content, model: item.model })),
+    timestamp,
+  });
+  zip.file('provenance.json', JSON.stringify({ version: 1, entries: chain }, null, 2));
+  zip.file('provenance.txt', renderProvenanceText(chain));
+
   zip.file(
     'README.md',
     [
@@ -103,6 +128,13 @@ export async function renderBundle(
       ...(skipped.length
         ? ['', '## Not included', '', ...skipped.map((s) => `- ${FORMAT_LABELS[s.format]} — ${s.reason}`)]
         : []),
+      '',
+      '## Provenance',
+      '',
+      '`provenance.json` and `provenance.txt` carry a hash chain over the source, the fact',
+      'ledger and every artefact above. Altering any of them breaks verification at that',
+      'entry. It is a hash chain, not a blockchain: it establishes integrity and ordering,',
+      'not authenticity of the original document.',
       '',
       '## Before you publish',
       '',

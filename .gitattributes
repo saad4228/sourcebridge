@@ -1,0 +1,23 @@
+# Normalise line endings for text, and keep binaries byte-exact.
+#
+# Without this, a clone on Windows rewrites LF to CRLF inside the sample PDFs.
+# That shifts every byte offset in the PDF cross-reference table, so the file
+# still looks present but will not open. The same applies to the .pptx and to
+# every image.
+
+* text=auto eol=lf
+
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.webp  binary
+*.ico   binary
+*.pptx  binary
+*.docx  binary
+*.xlsx  binary
+*.zip   binary
+*.mp4   binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary

@@ -32,6 +32,8 @@ Built for SIH 2026, problem statement 26154.
 | Evidence inspection (click a reference, read the passage) | Implemented |
 | Per-format regeneration and retry after failure | Implemented |
 | Structural validation (invalid references, drifted figures, overflow) | Implemented |
+| Meaning-drift detection (a qualifier dropped or a claim strengthened) | Implemented |
+| Tamper-evident provenance record shipped with every bundle export | Implemented |
 | Markdown / text export for all seven formats | Implemented |
 | `.pptx` export with speaker notes | Implemented |
 | Six slide layouts, including native editable PowerPoint charts | Implemented |
@@ -68,6 +70,15 @@ Stated plainly, because the interface is not allowed to imply otherwise:
 - **No generative video or imagery.** Frames are drawn by application code, never by an image or
   video model. That is deliberate: a generative model cannot be trusted to render a figure
   correctly, and in a video the viewer has no way to check it.
+- **The provenance record is a hash chain, not a blockchain.** Every bundle export carries a
+  SHA-256 chain over the source, the fact ledger and each artefact, each entry sealed over the
+  one before it, so altering any of them breaks verification at that entry. It establishes
+  integrity and ordering. It does **not** prove the source document was authentic, and nothing
+  is anchored to an external ledger.
+- **Meaning-drift detection is lexical, not semantic.** It compares the qualifiers in a cited
+  passage against the wording of the output that cites it. It catches a dropped "preliminary"
+  or a "some" that became "all". It does not understand the claim, and a faithful paraphrase
+  that abandons every qualifier family will be reported for a human to judge.
 - **No fact verification.** Validation is structural: it checks that evidence IDs resolve, that
   figures in the output also appear in the source, and that content fits its layout. It does **not**
   check whether the content is true or correctly interpreted.
@@ -180,7 +191,7 @@ startup.
 npm run dev         # development server
 npm run build       # production build
 npm run start       # production server (after build)
-npm test            # 184 tests, no API key required
+npm test            # 220 tests, no API key required
 npm run typecheck   # TypeScript, no emit
 npm run lint        # ESLint
 npm run smoke       # live end-to-end check against a running server (uses your API key)
@@ -197,8 +208,10 @@ powershell -File scripts/pptx-to-png.ps1 <in.pptx> <dir>   # open a .pptx in Pow
 
 ## Sample workflow
 
-1. Press **Try the sample report** — a synthetic rainwater-harvesting pilot report from
-   [`samples/`](samples/).
+1. Press **Try the sample incident report** — a synthetic preliminary cyber-incident
+   assessment from [`samples/`](samples/), rebuildable with
+   `node scripts/build-sample-report.mjs`. Its hedged wording is deliberate: it is what
+   meaning-drift detection is demonstrated against.
 2. Review the extracted pages. Each passage shows its stable ID.
 3. The **shared fact ledger** builds automatically: claims, figures with units, dates and caveats.
 4. Choose an audience (for example *General public*), an objective and a tone.
@@ -234,7 +247,7 @@ citations to fill the gap.
 npm test
 ```
 
-184 tests run without an API key:
+220 tests run without an API key:
 
 - **Extraction** — page metadata, segment ID uniqueness, figures and caveats surviving extraction,
   results tables kept whole, paragraph reflow, oversized input rejected rather than truncated,
@@ -380,7 +393,7 @@ lib/
   client/         browser API helpers and workspace state
 samples/          synthetic test documents
 scripts/          smoke test, deck builder, screenshot driver
-tests/            184 tests
+tests/            220 tests
 ```
 
 ---
@@ -401,7 +414,7 @@ tests/            184 tests
 | [playwright-core](https://playwright.dev) | Screenshot script (dev only) | Apache-2.0 |
 
 Sample documents in `samples/` are synthetic and were generated for this project. The
-rainwater-harvesting pilot they describe is fictional.
+incident, the organisations and every figure they describe are fictional.
 
 ---
 

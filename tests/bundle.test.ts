@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import JSZip from 'jszip';
 import { renderBundle } from '@/lib/export/bundle';
+import { canonical, sha256Hex, verifyAuditChain } from '@/lib/audit';
 import type { Infographic, LinkedInPost, Presentation } from '@/lib/schemas';
 import type { GenerationBrief } from '@/lib/types';
 
@@ -129,5 +130,81 @@ describe('bundle export', () => {
 
     expect(markdown).toContain('Operator rewrote this hook');
     expect(markdown).not.toContain('A pilot cut water use.');
+  });
+});
+
+describe('provenance record', () => {
+  const provenance = {
+    source: { title: 'incident.pdf', kind: 'pdf', text: '37 systems were affected.' },
+    ledger: { facts: [{ claim: '37 systems affected' }] },
+  };
+
+  it('ships a chain that verifies', async () => {
+    const { bytes } = await renderBundle(
+      [
+        { format: 'presentation', content: deck },
+        { format: 'linkedin', content: post },
+      ],
+      'incident.pdf',
+      brief,
+      provenance,
+    );
+    const zip = await JSZip.loadAsync(bytes);
+    const record = JSON.parse(await zip.file('provenance.json')!.async('string'));
+
+    expect(await verifyAuditChain(record.entries)).toEqual({ ok: true });
+    // Source, ledger, then one entry per artefact actually written.
+    expect(record.entries.map((e: { kind: string }) => e.kind)).toEqual([
+      'source',
+      'ledger',
+      'artifact',
+      'artifact',
+    ]);
+  });
+
+  it('detects a swapped artefact after export', async () => {
+    const { bytes } = await renderBundle(
+      [{ format: 'linkedin', content: post }],
+      'incident.pdf',
+      brief,
+      provenance,
+    );
+    const zip = await JSZip.loadAsync(bytes);
+    const record = JSON.parse(await zip.file('provenance.json')!.async('string'));
+
+    // Someone edits the artefact and recomputes only its own content hash.
+    record.entries[2].contentHash = await sha256Hex(canonical({ body: 'doctored' }));
+
+    expect((await verifyAuditChain(record.entries)).ok).toBe(false);
+  });
+
+  it('records only the artefacts that were actually included', async () => {
+    // A format whose renderer failed must not appear in the record, or the
+    // chain would describe a bundle the recipient does not have.
+    const { bytes, skipped } = await renderBundle(
+      [
+        { format: 'linkedin', content: post },
+        { format: 'presentation', content: { nonsense: true } },
+      ],
+      'incident.pdf',
+      brief,
+      provenance,
+    );
+    const zip = await JSZip.loadAsync(bytes);
+    const record = JSON.parse(await zip.file('provenance.json')!.async('string'));
+
+    expect(skipped).toHaveLength(1);
+    expect(record.entries.filter((e: { kind: string }) => e.kind === 'artifact')).toHaveLength(1);
+  });
+
+  it('states plainly what the record is not', async () => {
+    const { bytes } = await renderBundle([{ format: 'linkedin', content: post }], null, brief);
+    const zip = await JSZip.loadAsync(bytes);
+
+    const text = await zip.file('provenance.txt')!.async('string');
+    expect(text).toContain('not a blockchain');
+
+    const readme = await zip.file('README.md')!.async('string');
+    expect(readme).toContain('hash chain, not a blockchain');
   });
 });

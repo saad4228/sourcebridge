@@ -31,10 +31,29 @@ const requestSchema = z.object({
 const bundleSchema = z.object({
   kind: z.literal('bundle'),
   items: z
-    .array(z.object({ format: z.enum(FORMAT_IDS), content: z.unknown() }))
+    .array(
+      z.object({
+        format: z.enum(FORMAT_IDS),
+        content: z.unknown(),
+        /** Recorded in the provenance chain alongside the artefact. */
+        model: z.string().optional(),
+      }),
+    )
     .min(1),
   sourceTitle: z.string().nullable().optional(),
   brief: briefWireSchema.optional(),
+  /**
+   * What the outputs were derived from. Sent by the client because the server
+   * holds no session state; the archive is self-contained either way.
+   */
+  provenance: z
+    .object({
+      source: z
+        .object({ title: z.string(), kind: z.string(), text: z.string() })
+        .nullable(),
+      ledger: z.unknown().optional(),
+    })
+    .optional(),
 });
 
 function slug(value: string): string {
@@ -80,6 +99,7 @@ export async function POST(request: Request) {
         asBundle.data.items,
         asBundle.data.sourceTitle ?? null,
         asBundle.data.brief as GenerationBrief | undefined,
+        asBundle.data.provenance,
       );
       const base = slug(asBundle.data.sourceTitle ?? 'sourcebridge');
       const response = fileResponse(bytes, `${base}-all-formats.zip`, 'application/zip');

@@ -200,7 +200,7 @@ export function Workspace() {
 
   /** Every completed artefact in one archive, rendered from the current edits. */
   const handleExportAll = useCallback(async () => {
-    const { artifacts, brief, source } = stateRef.current;
+    const { artifacts, brief, source, ledger } = stateRef.current;
     const items = brief.formats
       .map((format) => artifacts[format])
       .filter((a): a is NonNullable<typeof a> => a?.status === 'complete')
@@ -214,6 +214,12 @@ export function Workspace() {
       items,
       sourceTitle: source?.title ?? null,
       brief,
+      // Sealed into the archive's hash chain, so a recipient can check the
+      // outputs against the source they were actually derived from.
+      provenance: {
+        source: source ? { title: source.title, kind: source.kind, text: source.text } : null,
+        ledger: brief.mode === 'creative' ? undefined : (ledger ?? undefined),
+      },
     });
     setExporting(null);
     setToast(result.ok ? `Downloaded ${result.data}` : result.error);
