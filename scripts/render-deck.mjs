@@ -9,6 +9,7 @@ import fs from 'node:fs';
 
 const OUT = process.argv[2] ?? 'layout-check.pptx';
 const BASE = process.argv[3] ?? 'http://localhost:3000';
+const THEME = process.argv[4];
 
 const deck = {
   title: 'Rainwater Harvesting Pilot: What We Learned',
@@ -102,7 +103,14 @@ const deck = {
 const res = await fetch(`${BASE}/api/export`, {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ format: 'presentation', kind: 'pptx', content: deck, sourceTitle: 'rainwater-pilot-report.pdf' }),
+  body: JSON.stringify({
+    format: 'presentation',
+    kind: 'pptx',
+    content: deck,
+    sourceTitle: 'rainwater-pilot-report.pdf',
+    // Pass a theme name as the third argument to check the other palette.
+    brief: THEME ? { mode: 'grounded', audience: 'General public', objective: 'Inform', tone: 'Neutral', language: 'English', detail: 'Standard', formats: ['presentation'], deckTheme: THEME } : undefined,
+  }),
 });
 if (!res.ok) {
   console.error('export failed', res.status, await res.text());

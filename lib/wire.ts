@@ -7,6 +7,7 @@
  */
 
 import { z } from 'zod';
+import { DECK_THEME_NAMES } from './export/deckTheme';
 import { FORMAT_IDS } from './types';
 
 export const sourceWireSchema = z.object({
@@ -62,6 +63,7 @@ export const briefWireSchema = z.object({
   language: z.string(),
   detail: z.string(),
   formats: z.array(z.enum(FORMAT_IDS)),
+  deckTheme: z.enum(DECK_THEME_NAMES).optional(),
   requiredMessages: z.string().optional(),
   callToAction: z.string().optional(),
   preserveTerms: z.string().optional(),

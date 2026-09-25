@@ -1,3 +1,4 @@
+import type { DeckThemeName } from './export/deckTheme';
 /**
  * SourceBridge data contracts (PRD section 13).
  *
@@ -133,6 +134,8 @@ export interface GenerationBrief {
   language: string;
   detail: DetailLevel;
   formats: FormatId[];
+  /** Deck palette for the .pptx export. Rendering only; never reaches a prompt. */
+  deckTheme?: DeckThemeName;
   /** Optional advanced fields. Empty values are omitted from the prompt. */
   requiredMessages?: string;
   callToAction?: string;

@@ -78,6 +78,7 @@ export async function renderBundle(
           `${stem}.pptx`,
           await renderPresentationPptx(content as Presentation, {
             sourceTitle: sourceTitle ?? undefined,
+            theme: brief?.deckTheme,
           }),
         );
       } else if (item.format === 'infographic') {

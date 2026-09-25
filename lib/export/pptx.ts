@@ -8,37 +8,19 @@
  * Charts are drawn by PowerPoint from real values, not pasted as pictures, so
  * they stay crisp and editable in the exported file.
  *
- * Layout rules that keep the deck looking designed rather than defaulted:
- * content fills the full body region instead of floating in the upper half,
- * every block sits on a tinted card rather than bare white, and list items get
- * numbered chips instead of bullet dots. Each is applied by this module alone,
- * so no model output can break them.
+ * The visual language comes from two reference decks, read out of their OOXML:
+ * a warm ground rather than white, headings in the accent colour, content on
+ * rounded cards with a heavy accent bar down the left edge, lists as
+ * alternating tinted rows, and compared columns under filled header chips.
+ * Colour lives in deckTheme.ts; every measurement below is shared by all
+ * themes, because the layouts are where the degradation rules live.
  */
 
 import PptxGenJS from 'pptxgenjs';
 import type { Presentation } from '../schemas';
 import { detectScript, pptxFontFace } from './fonts';
 import { resolveLayout, type Slide } from './slideLayout';
-
-/**
- * A tint scale rather than a single accent.
- *
- * Depth is what separates a designed deck from a default one, and it comes
- * from several steps of one hue used deliberately -- not from more colours.
- */
-const THEME = {
-  ink: '0B1220',
-  inkSoft: '334155',
-  muted: '64748B',
-  accent: '0F766E',
-  accentDeep: '0A574F',
-  accentBright: '14B8A6',
-  tint: 'F2FAF8',
-  tintDeep: 'DCF0EC',
-  rule: 'E2E8F0',
-  page: 'FFFFFF',
-  onAccent: 'FFFFFF',
-} as const;
+import { DISPLAY_FONT, resolveTheme } from './deckTheme';
 
 /** Slide geometry for LAYOUT_16x9 (10 x 5.625 inches). */
 const W = 10;
@@ -48,15 +30,16 @@ const MARGIN = 0.7;
 /**
  * The content region: everything between the heading and the footer.
  *
- * Deliberately tall. The previous box stopped well short of the footer, which
- * left a dead band across the bottom third of every slide no matter what the
- * model wrote.
+ * Deliberately tall. A box that stops short of the footer leaves a dead band
+ * across the bottom third of every slide no matter what the model writes.
  */
-const BODY_Y = 1.52;
-const BODY_H = H - 0.62 - BODY_Y;
+const BODY_Y = 1.62;
+const BODY_H = H - 0.6 - BODY_Y;
 
 /** Corner softness for every card. One value, so the deck stays consistent. */
 const RADIUS = 0.08;
+/** Width of the accent bar down a card's left edge — the references' signature. */
+const EDGE_W = 0.11;
 
 /** Caps matched to the layouts below. Beyond these, text is trimmed. */
 const MAX_TITLE_CHARS = 70;
@@ -83,102 +66,20 @@ function estimateLines(text: string, charsPerLine: number): number {
 export interface PptxOptions {
   /** Shown on the title slide under the deck title. */
   sourceTitle?: string;
+  /** Theme name; falls back to the default when unknown. */
+  theme?: string;
 }
 
 type PptxSlide = ReturnType<PptxGenJS['addSlide']>;
 
-/** A soft card. Every content block sits on one, so nothing floats on bare white. */
-function card(
-  s: PptxSlide,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  color: string = THEME.tint,
-) {
-  s.addShape('roundRect', { x, y, w, h, rectRadius: RADIUS, fill: { color } });
-}
-
-/** Title plus a short accent rule, set tight beneath it rather than adrift. */
-function drawHeading(s: PptxSlide, slide: Slide, fontFace?: string) {
-  s.addText(clamp(slide.title, MAX_TITLE_CHARS), {
-    x: MARGIN,
-    y: 0.46,
-    w: W - MARGIN * 2,
-    h: 0.7,
-    fontSize: 30,
-    bold: true,
-    color: THEME.ink,
-    valign: 'middle',
-    fontFace,
-  });
-  // Close under the title: the old gap left this dash floating between two
-  // blocks, belonging to neither.
-  s.addShape('roundRect', {
-    x: MARGIN,
-    y: 1.19,
-    w: 0.62,
-    h: 0.07,
-    rectRadius: 0.5,
-    fill: { color: THEME.accent },
-  });
-}
-
-/**
- * Page number and a progress bar along the bottom edge.
- *
- * The bar is decoration that happens to be informative: it shows how far
- * through the deck a slide sits, which a bare number does not.
- */
-function drawFooter(s: PptxSlide, index: number, total: number, onAccent = false) {
-  // Section dividers are a breath in the deck, so they carry no progress bar:
-  // full-bleed slides read better without chrome across the bottom edge.
-  if (!onAccent) {
-    const done = (index + 1) / total;
-    s.addShape('rect', { x: 0, y: H - 0.06, w: W, h: 0.06, fill: { color: THEME.rule } });
-    s.addShape('rect', {
-      x: 0,
-      y: H - 0.06,
-      w: W * done,
-      h: 0.06,
-      fill: { color: THEME.accent },
-    });
-  }
-  s.addText(`${index + 1}`, {
-    x: W - MARGIN - 0.5,
-    y: H - 0.52,
-    w: 0.5,
-    h: 0.3,
-    fontSize: 10,
-    color: onAccent ? THEME.tintDeep : THEME.muted,
-    align: 'right',
-  });
-}
-
-function attachNotes(s: PptxSlide, slide: Slide) {
-  const notes: string[] = [];
-  if (slide.mainMessage?.trim()) notes.push(`Main message: ${slide.mainMessage.trim()}`);
-  if (slide.speakerNotes?.trim()) notes.push(slide.speakerNotes.trim());
-  // A production recommendation, not a generated image. It belongs with the
-  // speaker, not printed on the slide the audience sees.
-  if (slide.visualType && slide.visualType !== 'none') {
-    notes.push(`Suggested visual: ${slide.visualType}`);
-  }
-  if (slide.evidence?.length) notes.push(`Evidence: ${slide.evidence.join(', ')}`);
-  if (notes.length) s.addNotes(notes.join('\n\n'));
-}
-
-/**
- * Build a .pptx and return it as bytes.
- *
- * Speaker notes are attached to every content slide, with evidence IDs, so the
- * deck stays traceable once it leaves the application.
- */
 export async function renderPresentationPptx(
   content: Presentation,
   options: PptxOptions = {},
 ): Promise<Uint8Array> {
+  const T = resolveTheme(options.theme);
+
   // One font family per run in OOXML, so pick from the script actually used.
+  // Indic text keeps its own face: the display font covers Latin only.
   const script = detectScript(
     [
       content.title,
@@ -186,7 +87,69 @@ export async function renderPresentationPptx(
       ...content.slides.flatMap((s) => [s.title, s.mainMessage, ...(s.bullets ?? [])]),
     ].join(' '),
   );
-  const fontFace = pptxFontFace(script);
+  const scriptFont = pptxFontFace(script);
+  const fontFace = scriptFont ?? DISPLAY_FONT;
+
+  /** A soft card. Every content block sits on one; nothing floats on bare ground. */
+  const card = (s: PptxSlide, x: number, y: number, w: number, h: number, color = T.tintSoft) => {
+    s.addShape('roundRect', { x, y, w, h, rectRadius: RADIUS, fill: { color } });
+  };
+
+  /** A card with the accent bar down its left edge. */
+  const edgedCard = (
+    s: PptxSlide,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    color = T.tintSoft,
+  ) => {
+    card(s, x, y, w, h, color);
+    s.addShape('rect', { x, y: y + RADIUS * 0.5, w: EDGE_W, h: h - RADIUS, fill: { color: T.accent } });
+  };
+
+  /** Slide title: accent colour, large and bold, with no rule beneath it. */
+  const drawHeading = (s: PptxSlide, slide: Slide) => {
+    s.addText(clamp(slide.title, MAX_TITLE_CHARS), {
+      x: MARGIN,
+      y: 0.46,
+      w: W - MARGIN * 2 - 0.5,
+      h: 0.86,
+      fontSize: 33,
+      bold: true,
+      color: T.accent,
+      valign: 'middle',
+      lineSpacingMultiple: 0.92,
+      fontFace,
+    });
+  };
+
+  /** Page number, bottom right, in the accent colour as both references do. */
+  const drawFooter = (s: PptxSlide, index: number, onAccent = false) => {
+    s.addText(`${index + 1}`, {
+      x: W - MARGIN - 0.5,
+      y: H - 0.58,
+      w: 0.5,
+      h: 0.34,
+      fontSize: 13,
+      bold: true,
+      color: onAccent ? T.onAccent : T.accent,
+      align: 'right',
+    });
+  };
+
+  const attachNotes = (s: PptxSlide, slide: Slide) => {
+    const notes: string[] = [];
+    if (slide.mainMessage?.trim()) notes.push(`Main message: ${slide.mainMessage.trim()}`);
+    if (slide.speakerNotes?.trim()) notes.push(slide.speakerNotes.trim());
+    // A production recommendation, not a generated image. It belongs with the
+    // speaker, not printed on the slide the audience sees.
+    if (slide.visualType && slide.visualType !== 'none') {
+      notes.push(`Suggested visual: ${slide.visualType}`);
+    }
+    if (slide.evidence?.length) notes.push(`Evidence: ${slide.evidence.join(', ')}`);
+    if (notes.length) s.addNotes(notes.join('\n\n'));
+  };
 
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_16x9';
@@ -195,229 +158,210 @@ export async function renderPresentationPptx(
 
   // --- Title slide ---------------------------------------------------------
   const title = pptx.addSlide();
-  title.background = { color: THEME.page };
-  // A large soft disc bleeding off the corner. Geometry carries the design
-  // here, so the slide needs no imagery to look composed.
-  title.addShape('ellipse', {
-    x: W - 3.1,
-    y: H - 2.9,
-    w: 5.2,
-    h: 5.2,
-    fill: { color: THEME.tint },
-  });
-  title.addShape('ellipse', {
-    x: W - 1.9,
-    y: H - 1.75,
-    w: 2.9,
-    h: 2.9,
-    fill: { color: THEME.tintDeep },
-  });
-  title.addShape('rect', { x: 0, y: 0, w: 0.26, h: H, fill: { color: THEME.accent } });
-
+  title.background = { color: T.page };
+  // The tall rounded panel bleeding off the right edge, from the blue
+  // reference. It carries the slide on its own, so no imagery is needed.
   title.addShape('roundRect', {
-    x: 0.85,
-    y: 1.42,
-    w: 0.62,
-    h: 0.07,
+    x: W - 0.62,
+    y: 0.16,
+    w: 1.1,
+    h: H - 0.32,
     rectRadius: 0.5,
-    fill: { color: THEME.accent },
+    fill: { color: T.accent },
+  });
+
+  title.addText('SOURCEBRIDGE', {
+    x: MARGIN,
+    y: 0.62,
+    w: 5,
+    h: 0.32,
+    fontSize: 11,
+    bold: true,
+    color: T.inkSoft,
+    charSpacing: 2,
+    fontFace,
   });
   title.addText(clamp(content.title, 90), {
-    x: 0.85,
-    y: 1.72,
-    w: 7.6,
-    h: 1.6,
-    fontSize: 42,
+    x: MARGIN,
+    y: 1.55,
+    w: W - MARGIN - 1.5,
+    h: 1.75,
+    fontSize: 44,
     bold: true,
-    color: THEME.ink,
+    color: T.accent,
     valign: 'top',
-    lineSpacingMultiple: 0.92,
+    lineSpacingMultiple: 0.9,
     fontFace,
   });
   if (content.subtitle?.trim()) {
-    title.addText(clamp(content.subtitle, 120), {
-      x: 0.85,
-      y: 3.45,
-      w: 7.2,
-      h: 0.7,
-      fontSize: 18,
-      color: THEME.inkSoft,
+    // The outlined capsule from the blue reference, which gives the subtitle
+    // a shape of its own instead of leaving it adrift under the title.
+    const label = clamp(content.subtitle, 78);
+    const capsuleW = Math.min(W - MARGIN - 1.6, 0.34 + label.length * 0.093);
+    title.addShape('roundRect', {
+      x: MARGIN,
+      y: 3.52,
+      w: capsuleW,
+      h: 0.46,
+      rectRadius: 0.5,
+      fill: { color: T.page },
+      line: { color: T.accent, width: 1.25 },
+    });
+    title.addText(label, {
+      x: MARGIN + 0.17,
+      y: 3.52,
+      w: capsuleW - 0.34,
+      h: 0.46,
+      fontSize: 13,
+      color: T.accent,
+      align: 'center',
+      valign: 'middle',
       fontFace,
     });
   }
   if (options.sourceTitle) {
     title.addText(`Source: ${clamp(options.sourceTitle, 80)}`, {
-      x: 0.85,
-      y: H - 0.92,
+      x: MARGIN,
+      y: H - 0.95,
       w: 6,
       h: 0.4,
       fontSize: 11,
-      color: THEME.muted,
+      color: T.inkSoft,
+      fontFace,
     });
   }
 
   // --- Content slides ------------------------------------------------------
-  const total = content.slides.length;
-
   content.slides.forEach((slide, index) => {
     const layout = resolveLayout(slide);
     const s = pptx.addSlide();
-    s.background = { color: THEME.page };
+    s.background = { color: T.page };
 
     switch (layout) {
       case 'section': {
-        // A divider: no heading rule, the title is the whole slide.
-        s.addShape('rect', { x: 0, y: 0, w: W, h: H, fill: { color: THEME.accent } });
-        // Tonal discs give the flat fill depth without introducing a colour.
-        s.addShape('ellipse', {
-          x: W - 2.6,
-          y: -1.5,
-          w: 4.6,
-          h: 4.6,
-          fill: { color: THEME.accentDeep },
-        });
-        s.addShape('ellipse', {
-          x: -1.3,
-          y: H - 1.9,
-          w: 3.2,
-          h: 3.2,
-          fill: { color: THEME.accentDeep },
-        });
+        // A divider: the accent fills the slide and the title is the whole of it.
+        s.addShape('rect', { x: 0, y: 0, w: W, h: H, fill: { color: T.accent } });
         s.addShape('roundRect', {
-          x: MARGIN,
-          y: H / 2 - 1.62,
-          w: 0.62,
-          h: 0.07,
+          x: -0.7,
+          y: 0.16,
+          w: 1.1,
+          h: H - 0.32,
           rectRadius: 0.5,
-          fill: { color: THEME.accentBright },
+          fill: { color: T.accentBright },
         });
-        // Bottom-aligned in a two-line box, so a one-line and a two-line title
-        // both finish at the same place and the sub-line sits just under it.
         s.addText(clamp(slide.title, 80), {
-          x: MARGIN,
-          y: H / 2 - 1.35,
-          w: W - MARGIN * 2 - 1.4,
-          h: 1.35,
+          x: MARGIN + 0.35,
+          y: H / 2 - 1.3,
+          w: W - MARGIN * 2 - 0.6,
+          h: 1.3,
           fontSize: 38,
           bold: true,
-          color: THEME.onAccent,
+          color: T.onAccent,
           valign: 'bottom',
-          lineSpacingMultiple: 0.95,
+          lineSpacingMultiple: 0.92,
           fontFace,
         });
         if (slide.mainMessage?.trim()) {
           s.addText(clamp(slide.mainMessage, 150), {
-            x: MARGIN,
-            y: H / 2 + 0.14,
-            w: W - MARGIN * 2 - 1.8,
+            x: MARGIN + 0.35,
+            y: H / 2 + 0.16,
+            w: W - MARGIN * 2 - 1.4,
             h: 0.9,
-            fontSize: 16,
-            color: THEME.tintDeep,
+            fontSize: 15,
+            color: T.onAccent,
             valign: 'top',
             fontFace,
           });
         }
-        drawFooter(s, index, total, true);
+        drawFooter(s, index, true);
         break;
       }
 
       case 'statement': {
-        drawHeading(s, slide, fontFace);
-        card(s, MARGIN, BODY_Y, W - MARGIN * 2, BODY_H);
-        // An accent edge turns a plain panel into a pull quote.
-        s.addShape('roundRect', {
-          x: MARGIN,
-          y: BODY_Y,
-          w: 0.1,
-          h: BODY_H,
-          rectRadius: 0.5,
-          fill: { color: THEME.accent },
-        });
+        drawHeading(s, slide);
+        edgedCard(s, MARGIN, BODY_Y, W - MARGIN * 2, BODY_H, T.tintMid);
         s.addText(clamp(slide.mainMessage, 240), {
-          x: MARGIN + 0.55,
+          x: MARGIN + EDGE_W + 0.5,
           y: BODY_Y,
-          w: W - MARGIN * 2 - 1.1,
+          w: W - MARGIN * 2 - EDGE_W - 1,
           h: BODY_H,
-          fontSize: 24,
-          color: THEME.ink,
+          fontSize: 23,
+          color: T.ink,
           valign: 'middle',
           lineSpacingMultiple: 1.15,
           fontFace,
         });
-        drawFooter(s, index, total);
+        drawFooter(s, index);
         break;
       }
 
       case 'stat': {
-        drawHeading(s, slide, fontFace);
+        drawHeading(s, slide);
         // resolveLayout only returns 'stat' when keyStat carries a value.
         const stat = slide.keyStat!;
         const figure = `${stat.value}${stat.unit ?? ''}`;
         // Shrink rather than let a long figure collide with the caption.
-        const size = figure.length > 10 ? 46 : figure.length > 6 ? 64 : 88;
-        const panelW = 4.25;
+        const size = figure.length > 10 ? 46 : figure.length > 6 ? 64 : 86;
+        const panelW = 4.15;
 
         // The figure gets a panel of its own, so it reads as a headline rather
         // than as text that happens to be large.
-        card(s, MARGIN, BODY_Y, panelW, BODY_H, THEME.tintDeep);
+        card(s, MARGIN, BODY_Y, panelW, BODY_H, T.tintMid);
         s.addText(figure, {
           x: MARGIN + 0.2,
-          y: BODY_Y + BODY_H / 2 - 1.05,
+          y: BODY_Y + BODY_H / 2 - 1.02,
           w: panelW - 0.4,
           h: 1.3,
           fontSize: size,
           bold: true,
-          color: THEME.accent,
+          color: T.accent,
           align: 'center',
           valign: 'bottom',
           fontFace,
         });
         s.addText(clamp(stat.caption, 80), {
           x: MARGIN + 0.3,
-          y: BODY_Y + BODY_H / 2 + 0.34,
+          y: BODY_Y + BODY_H / 2 + 0.2,
           w: panelW - 0.6,
           h: 0.7,
           fontSize: 13,
-          color: THEME.inkSoft,
+          color: T.ink,
           align: 'center',
           valign: 'top',
           fontFace,
         });
 
-        // The message gets a panel too. A full-height block beside a bare
-        // column reads as unfinished; two panels read as a composition.
-        const restX = MARGIN + panelW + 0.35;
+        // A second panel beside it: a full-height block next to a bare column
+        // reads as unfinished, two panels read as a composition.
+        const restX = MARGIN + panelW + 0.32;
         const restW = W - restX - MARGIN;
-        card(s, restX, BODY_Y, restW, BODY_H);
+        edgedCard(s, restX, BODY_Y, restW, BODY_H);
         s.addText(clamp(slide.mainMessage, 220), {
-          x: restX + 0.34,
+          x: restX + EDGE_W + 0.3,
           y: BODY_Y,
-          w: restW - 0.68,
+          w: restW - EDGE_W - 0.6,
           h: BODY_H,
-          fontSize: 18,
-          color: THEME.ink,
+          fontSize: 17,
+          color: T.ink,
           valign: 'middle',
           lineSpacingMultiple: 1.12,
           fontFace,
         });
-        drawFooter(s, index, total);
+        drawFooter(s, index);
         break;
       }
 
       case 'comparison': {
-        drawHeading(s, slide, fontFace);
+        drawHeading(s, slide);
         // resolveLayout only returns 'comparison' when both sides have points.
         const comparison = slide.comparison!;
-        const gap = 0.35;
+        const gap = 0.32;
         const colW = (W - MARGIN * 2 - gap) / 2;
-        const headH = 0.52;
+        const chipH = 0.5;
+        const chipGap = 0.14;
         const sides = [
           { label: comparison.leftLabel, points: comparison.leftPoints, x: MARGIN },
-          {
-            label: comparison.rightLabel,
-            points: comparison.rightPoints,
-            x: MARGIN + colW + gap,
-          },
+          { label: comparison.rightLabel, points: comparison.rightPoints, x: MARGIN + colW + gap },
         ];
 
         // Size both columns to whichever side has more to say, then centre the
@@ -429,61 +373,65 @@ export async function renderPresentationPptx(
           ...sides.map((side) =>
             side.points
               .slice(0, 4)
-              .reduce((sum, text) => sum + estimateLines(text, 36) * lineH + paraGap, 0),
+              .reduce((sum, text) => sum + estimateLines(text, 34) * lineH + paraGap, 0),
           ),
         );
-        const cardH = Math.min(BODY_H, headH + 0.22 + tallest + 0.1);
-        const cardY = BODY_Y + (BODY_H - cardH) / 2;
+        // The running total adds a gap after the final item too, so take it
+        // back: otherwise every card carries a spare line of empty tint.
+        const cardH = Math.min(BODY_H - chipH - chipGap, tallest - paraGap + 0.38);
+        const top = BODY_Y + (BODY_H - (chipH + chipGap + cardH)) / 2;
 
         sides.forEach((side, i) => {
-          card(s, side.x, cardY, colW, cardH);
-          // A filled header band reads as a label; bold text alone does not.
+          // A separate filled chip above the card, from the orange reference.
           s.addShape('roundRect', {
             x: side.x,
-            y: cardY,
+            y: top,
             w: colW,
-            h: headH,
+            h: chipH,
             rectRadius: RADIUS,
-            fill: { color: i === 0 ? THEME.accent : THEME.accentBright },
+            fill: { color: i === 0 ? T.accent : T.accentBright },
           });
           s.addText(clamp(side.label || ' ', 40), {
-            x: side.x + 0.24,
-            y: cardY,
-            w: colW - 0.48,
-            h: headH,
-            fontSize: 14,
+            x: side.x + 0.2,
+            y: top,
+            w: colW - 0.4,
+            h: chipH,
+            fontSize: 15,
             bold: true,
-            color: THEME.onAccent,
+            color: T.onAccent,
+            align: 'center',
             valign: 'middle',
             fontFace,
           });
+
+          card(s, side.x, top + chipH + chipGap, colW, cardH);
           s.addText(
             side.points.slice(0, 4).map((text) => ({
               text: clamp(text, 90),
               options: {
                 bullet: { characterCode: '2013' },
                 fontSize: 13,
-                color: THEME.ink,
+                color: T.ink,
                 breakLine: true,
                 paraSpaceAfter: 10,
                 fontFace,
               },
             })),
             {
-              x: side.x + 0.28,
-              y: cardY + headH + 0.18,
-              w: colW - 0.56,
-              h: cardH - headH - 0.3,
+              x: side.x + 0.26,
+              y: top + chipH + chipGap + 0.18,
+              w: colW - 0.52,
+              h: cardH - 0.34,
               valign: 'top',
             },
           );
         });
-        drawFooter(s, index, total);
+        drawFooter(s, index);
         break;
       }
 
       case 'chart': {
-        drawHeading(s, slide, fontFace);
+        drawHeading(s, slide);
         // resolveLayout only returns 'chart' when the series is usable.
         const chart = slide.chart!;
         const type =
@@ -492,8 +440,9 @@ export async function renderPresentationPptx(
             : chart.kind === 'pie'
               ? pptx.ChartType.pie
               : pptx.ChartType.bar;
-        const chartW = 5.75;
-        const restX = MARGIN + chartW + 0.35;
+        const chartW = 5.6;
+        const restX = MARGIN + chartW + 0.32;
+        const restW = W - restX - MARGIN;
 
         card(s, MARGIN, BODY_Y, chartW, BODY_H);
         // A real chart object, so it stays editable in PowerPoint. Inset
@@ -506,90 +455,70 @@ export async function renderPresentationPptx(
             y: BODY_Y + 0.18,
             w: chartW - 0.36,
             h: BODY_H - 0.36,
-            chartColors: ['0F766E', '14B8A6', '5EEAD4', '99F6E4'],
+            chartColors: [...T.chart],
             showLegend: chart.kind === 'pie',
             legendPos: 'b',
-            legendColor: THEME.muted,
+            legendColor: T.inkSoft,
             legendFontSize: 10,
             showValue: chart.kind !== 'pie',
-            dataLabelColor: THEME.inkSoft,
+            dataLabelColor: T.ink,
             dataLabelFontSize: 10,
-            catAxisLabelColor: THEME.muted,
-            valAxisLabelColor: THEME.muted,
+            catAxisLabelColor: T.inkSoft,
+            valAxisLabelColor: T.inkSoft,
             catAxisLabelFontSize: 10,
             valAxisLabelFontSize: 10,
-            valGridLine: { color: THEME.rule, size: 1 },
+            // Horizontal rules only, as both references draw them.
+            valGridLine: { color: T.tintMid, size: 1 },
             catGridLine: { style: 'none' },
           },
         );
 
-        const restW = W - restX - MARGIN;
-        card(s, restX, BODY_Y, restW, BODY_H);
+        edgedCard(s, restX, BODY_Y, restW, BODY_H);
         s.addText(clamp(slide.mainMessage, 200), {
-          x: restX + 0.3,
+          x: restX + EDGE_W + 0.26,
           y: BODY_Y,
-          w: restW - 0.6,
+          w: restW - EDGE_W - 0.52,
           h: BODY_H,
-          fontSize: 16,
-          color: THEME.ink,
+          fontSize: 15,
+          color: T.ink,
           valign: 'middle',
           lineSpacingMultiple: 1.12,
           fontFace,
         });
-        drawFooter(s, index, total);
+        drawFooter(s, index);
         break;
       }
 
       default: {
-        drawHeading(s, slide, fontFace);
+        drawHeading(s, slide);
         const bullets = (slide.bullets ?? []).slice(0, MAX_BULLETS);
         const n = Math.max(bullets.length, 1);
-        const gap = 0.14;
-        // Rows are sized to fill the body, so three points and five points
-        // both produce a balanced slide instead of a top-heavy one.
+        const gap = 0.13;
+        // Rows sized to fill the body, so three points and five points both
+        // produce a balanced slide instead of a top-heavy one.
         const rowH = Math.min(0.92, (BODY_H - gap * (n - 1)) / n);
         const blockH = rowH * n + gap * (n - 1);
         const startY = BODY_Y + (BODY_H - blockH) / 2;
-        const chip = Math.min(0.34, rowH - 0.22);
-        const fontSize = n <= 3 ? 17 : 15;
+        const fontSize = n <= 3 ? 16 : 14;
 
         bullets.forEach((text, i) => {
           const y = startY + i * (rowH + gap);
-          card(s, MARGIN, y, W - MARGIN * 2, rowH);
-          // A numbered chip instead of a bullet dot: the dot is the clearest
-          // single signal of a deck nobody designed.
-          s.addShape('roundRect', {
-            x: MARGIN + 0.26,
-            y: y + (rowH - chip) / 2,
-            w: chip,
-            h: chip,
-            rectRadius: 0.35,
-            fill: { color: THEME.accent },
-          });
-          s.addText(`${i + 1}`, {
-            x: MARGIN + 0.26,
-            y: y + (rowH - chip) / 2,
-            w: chip,
-            h: chip,
-            fontSize: 11,
-            bold: true,
-            color: THEME.onAccent,
-            align: 'center',
-            valign: 'middle',
-          });
+          // Alternating tints, straight from the orange reference: it gives a
+          // list rhythm without needing a bullet glyph at all.
+          edgedCard(s, MARGIN, y, W - MARGIN * 2, rowH, i % 2 === 0 ? T.tintMid : T.tintSoft);
           s.addText(clamp(text, MAX_BULLET_CHARS), {
-            x: MARGIN + 0.26 + chip + 0.26,
+            x: MARGIN + EDGE_W + 0.34,
             y,
-            w: W - MARGIN * 2 - chip - 0.9,
+            w: W - MARGIN * 2 - EDGE_W - 0.7,
             h: rowH,
             fontSize,
-            color: THEME.ink,
+            color: T.ink,
             valign: 'middle',
             lineSpacingMultiple: 1.05,
             fontFace,
           });
         });
-        drawFooter(s, index, total);
+        drawFooter(s, index);
       }
     }
 

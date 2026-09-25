@@ -10,6 +10,7 @@
 import { useState } from 'react';
 import { Badge, Button, Field, Panel, Select, Spinner, cx } from './ui';
 import { FormatIcon } from './FormatIcon';
+import { DECK_THEME_LABELS, DECK_THEME_NAMES } from '@/lib/export/deckTheme';
 import { FORMAT_DESCRIPTIONS, FORMAT_IDS, FORMAT_LABELS } from '@/lib/types';
 import type { FormatId, GenerationBrief } from '@/lib/types';
 
@@ -171,6 +172,23 @@ export function ConfigPanel({
           >
             {DETAILS.map((d) => (
               <option key={d}>{d}</option>
+            ))}
+          </Select>
+        </Field>
+
+        {/* Affects the .pptx rendering only; it never reaches a prompt. */}
+        <Field label="Deck palette" htmlFor="deck-theme">
+          <Select
+            id="deck-theme"
+            value={brief.deckTheme ?? 'navy'}
+            onChange={(e) =>
+              onBriefChange({ deckTheme: e.target.value as GenerationBrief['deckTheme'] })
+            }
+          >
+            {DECK_THEME_NAMES.map((name) => (
+              <option key={name} value={name}>
+                {DECK_THEME_LABELS[name]}
+              </option>
             ))}
           </Select>
         </Field>

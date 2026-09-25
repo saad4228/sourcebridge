@@ -152,6 +152,7 @@ export async function POST(request: Request) {
         }
         const bytes = await renderPresentationPptx(content as Presentation, {
           sourceTitle: sourceTitle ?? undefined,
+          theme: body.brief?.deckTheme,
         });
         return fileResponse(
           bytes,
