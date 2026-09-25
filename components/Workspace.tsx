@@ -389,6 +389,7 @@ export function Workspace() {
         </main>
       ) : inCreative ? (
         <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 p-4">
+          <h1 className="sr-only">SourceBridge workspace: creative draft</h1>
           <Callout tone="warning" title="Creative draft mode">
             There is no source document, so nothing generated here is source-verified and no evidence
             is cited. Check every claim before use.
@@ -436,6 +437,13 @@ export function Workspace() {
         </main>
       ) : state.source ? (
         <main className="mx-auto grid w-full max-w-[1600px] flex-1 items-start gap-4 p-4 lg:grid-cols-[minmax(320px,380px)_minmax(0,1fr)]">
+          {/*
+            The workspace replaces the landing page, which carried the only h1.
+            Without this the whole view starts at h2, so assistive technology
+            has no top-level heading to announce or navigate to. Visually
+            hidden because the header already names the product on screen.
+          */}
+          <h1 className="sr-only">SourceBridge workspace: {state.source.title}</h1>
           <div className="lg:sticky lg:top-[64px] lg:max-h-[calc(100vh-80px)] lg:overflow-hidden">
             <SourcePanel
               source={state.source}
