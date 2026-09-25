@@ -194,6 +194,32 @@ const DETAIL_BY_FORMAT: Partial<Record<FormatId, Record<string, string>>> = {
   // fits in one, and turned every short item into a five-post thread whether
   // it needed one or not. Detail decides how much room the thread may take;
   // whether it needs a thread at all stays the model's judgement.
+  // A deck grows by slide count, not by slide density. Every field on a slide
+  // is capped by the rules above -- one point per slide, 3 to 5 short bullets
+  // -- so the generic "write more in each field" instruction had nothing it
+  // was allowed to inflate. Measured before this, Detailed produced six slides
+  // where Standard produced seven: the only thing that scaled was the speaker
+  // notes, which are not what anyone sees on screen.
+  presentation: {
+    Brief: 'Produce 5 to 6 slides in total.',
+    Standard: 'Produce 8 to 10 slides in total.',
+    Detailed:
+      'Produce 12 to 15 slides in total. Spread the material across more slides rather than ' +
+      'crowding any one of them: every per-slide rule above still holds, so each slide still ' +
+      'makes a single point with 3 to 5 short bullets. Spend the extra slides on the sequence ' +
+      'of events, the supporting figures, the secondary findings and the limitations, and keep ' +
+      'the layouts varied across them.',
+  },
+
+  // Scenes are the same lever for a video package.
+  video_package: {
+    Brief: 'Produce 3 to 4 scenes in total.',
+    Standard: 'Produce 5 to 7 scenes in total.',
+    Detailed:
+      'Produce 8 to 12 scenes in total. Give each scene one idea rather than lengthening any ' +
+      'scene: more detail means more scenes, and the narration of each stays speakable.',
+  },
+
   x_thread: {
     Brief:
       'Aim for a single post. If the essentials will not fit inside the character limit, use 2 ' +
