@@ -11,6 +11,14 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { cx } from './ui';
 
+/*
+ * A note on width. Autosize below sets w-full on the textarea, so a width
+ * class passed through className competes with it and the outcome depends on
+ * stylesheet order rather than on what the caller wrote. Size the surrounding
+ * cell instead. Getting this wrong squeezed a field to almost no width, and
+ * the auto-grow then measured a wrapped column hundreds of pixels tall.
+ */
+
 /** Immutable set-by-path. Used so an edit never mutates generated content. */
 export function setIn<T>(target: T, path: (string | number)[], value: unknown): T {
   if (path.length === 0) return value as T;

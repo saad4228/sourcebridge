@@ -979,37 +979,61 @@ function InfographicPreview({ content, editing, onChange, onEvidence }: PreviewP
                 blank={() => ({ value: '', unit: '', caption: '', evidence: [] })}
                 onChange={(next) => set(['statistics'], next)}
               >
-                {(stat, i) => (
-                  <div key={i} className="flex items-baseline gap-2">
-                    <EditableText
-                      as="span"
-                      label={`Statistic ${i + 1} value`}
-                      value={stat.value}
-                      editing={editing}
-                      onChange={(v) => set(['statistics', i, 'value'], v)}
-                      placeholder="value"
-                      className="w-16 font-mono text-sm font-semibold text-[var(--color-accent)]"
-                    />
-                    <EditableText
-                      as="span"
-                      label={`Statistic ${i + 1} unit`}
-                      value={stat.unit ?? ''}
-                      editing={editing}
-                      onChange={(v) => set(['statistics', i, 'unit'], v)}
-                      placeholder="unit"
-                      className="w-10 font-mono text-sm font-semibold text-[var(--color-accent)]"
-                    />
-                    <EditableText
-                      as="span"
-                      label={`Statistic ${i + 1} caption`}
-                      value={stat.caption}
-                      editing={editing}
-                      onChange={(v) => set(['statistics', i, 'caption'], v)}
-                      className="flex-1 text-xs text-[var(--color-ink-muted)]"
-                    />
-                    <EvidenceChip ids={stat.evidence} onEvidence={onEvidence} />
-                  </div>
-                )}
+                {(stat, i) =>
+                  editing ? (
+                    // A grid, because the editable field is a textarea that
+                    // sets its own width to 100%. A width class passed to it
+                    // fights that, and the loser was the caption: squeezed to
+                    // almost nothing, its auto-grow then measured a wrapped
+                    // column hundreds of pixels tall and blew the row apart.
+                    // Sizing the cell instead leaves the textarea to fill it.
+                    <div
+                      key={i}
+                      className="grid grid-cols-[4.5rem_3.5rem_minmax(0,1fr)_auto] items-start gap-2"
+                    >
+                      <EditableText
+                        as="span"
+                        label={`Statistic ${i + 1} value`}
+                        value={stat.value}
+                        editing
+                        onChange={(v) => set(['statistics', i, 'value'], v)}
+                        placeholder="value"
+                        className="font-mono text-sm font-semibold text-[var(--color-accent)]"
+                      />
+                      <EditableText
+                        as="span"
+                        label={`Statistic ${i + 1} unit`}
+                        value={stat.unit ?? ''}
+                        editing
+                        onChange={(v) => set(['statistics', i, 'unit'], v)}
+                        placeholder="unit"
+                        className="font-mono text-sm font-semibold text-[var(--color-accent)]"
+                      />
+                      <EditableText
+                        as="span"
+                        label={`Statistic ${i + 1} caption`}
+                        value={stat.caption}
+                        editing
+                        onChange={(v) => set(['statistics', i, 'caption'], v)}
+                        className="text-xs text-[var(--color-ink-muted)]"
+                      />
+                      <EvidenceChip ids={stat.evidence} onEvidence={onEvidence} />
+                    </div>
+                  ) : (
+                    // Reading: value and unit sit together so "18" and "%"
+                    // read as one figure.
+                    <div key={i} className="flex items-baseline gap-2">
+                      <span className="font-mono text-sm font-semibold text-[var(--color-accent)]">
+                        {stat.value}
+                        {stat.unit}
+                      </span>
+                      <span className="flex-1 text-xs text-[var(--color-ink-muted)]">
+                        {stat.caption}
+                      </span>
+                      <EvidenceChip ids={stat.evidence} onEvidence={onEvidence} />
+                    </div>
+                  )
+                }
               </EditableRows>
             </div>
           </div>
