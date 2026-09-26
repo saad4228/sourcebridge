@@ -1,0 +1,42 @@
+# Runs on every push and pull request.
+#
+# The deployment host rebuilds automatically from this branch, so without a
+# check here a broken push reaches the live site before anyone notices. These
+# four steps are the same ones run locally before committing, and none of them
+# needs an API key: the test suite is designed to run without one.
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # `npm ci` rather than `npm install`: it installs exactly what the
+      # lockfile records, so CI cannot pass against a different dependency
+      # tree from the one that will be deployed.
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests
+        run: npm test
+
+      # Catches what the other three cannot: a build-time failure such as a
+      # module that resolves in development but not in a production bundle.
+      - name: Production build
+        run: npm run build
