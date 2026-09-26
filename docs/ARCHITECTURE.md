@@ -1,211 +1,116 @@
 # SourceBridge — Architecture
 
-SIH 2026 · Problem statement 26154 · Maximum two pages
+**SIH 2026 · Problem statement 26154 · Theme: Blockchain & Cybersecurity**
 
----
+One source document becomes seven audience-specific communication artefacts sharing a single factual
+foundation, with every claim traceable to the passage it came from.
 
-## Page 1 — Goals, components and structure
+## 1. The problem
 
-### Goal
+One incident report must become an executive summary, a public advisory, a briefing deck, a social
+post and a video script. Written separately they drift: a figure is rounded, a caveat dropped,
+*"attribution remains unconfirmed"* becomes *"attribution confirmed"*. The number is rarely wrong —
+the **certainty around it** is. Asking a chatbot five times reproduces that drift, because each
+answer is independent. The architecture, not the model, is what prevents it.
 
-Organisations rewrite the same information repeatedly for different audiences and channels. Doing it
-by hand is slow, and the versions drift: a figure gets rounded, a caveat gets dropped, a
-recommendation appears that the source never made.
-
-SourceBridge transforms one source into several communication artefacts that share a single factual
-foundation, and makes the link between each claim and its supporting passage inspectable.
-
-### Design principles
-
-1. **Understand the source once.** Extraction and fact analysis run once per source; every format
-   reuses the result. No repeated parsing, no per-format drift.
-2. **Source material is data, not instructions.** Uploaded text is fenced and explicitly marked as
-   data. Directives embedded in a document are never treated as commands.
-3. **The model writes; the application renders.** Structured content comes from the model. Slides,
-   SVG and packages are produced by deterministic code, so output cannot be broken — or hijacked —
-   by an unexpected response.
-4. **Partial success is normal.** One format per request. A failure affects one artefact.
-5. **Human control is the product.** Everything is editable, every claim is traceable, and every
-   limitation is stated rather than hidden.
-
-### Component diagram
+## 2. Pipeline
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│ Browser — Next.js workspace (React, TypeScript, Tailwind)        │
-│                                                                  │
-│  SourcePanel      ConfigPanel      OutputPanel    EvidenceDrawer │
-│  (input, pages)   (brief,formats)  (7 previews)   (passages)     │
-│                                                                  │
-│  Workspace state: source · ledger · brief · artifacts            │
-│  Generated content and operator edits held in SEPARATE fields    │
-└───────────────────────────────┬──────────────────────────────────┘
-                                │  fetch (JSON / multipart)
-┌───────────────────────────────▼──────────────────────────────────┐
-│ Next.js server routes (Node runtime)                             │
-│                                                                  │
-│  /api/extract   validate · PDF text · reflow · segment by ID     │
-│  /api/analyze   shared fact ledger · strip invented evidence IDs │
-│  /api/generate  one format · schema validate · repair · checks   │
-│  /api/export    deterministic renderers — NO model call          │
-│  /api/sample    bundled sample, extracted server-side            │
-│  /api/health    provider reachability, never reveals the key     │
-│                                                                  │
-│  lib/provider.ts — the ONLY place the API key is read            │
-└───────────────────────────────┬──────────────────────────────────┘
-                                │  HTTPS, server-side credentials
-                     ┌──────────▼──────────┐
-                     │  Google Gemini API  │
-                     └─────────────────────┘
+ SOURCE   PDF · image · video · URL · text ──► extracted per page,
+    │                                          segmented into passages
+    ▼                                          with stable IDs
+ FACT LEDGER   facts · figures+units · dates · entities · CAVEATS
+    │          ONE analysis pass, each entry carrying its segment IDs
+    ├────┬────┬────┬────┬────┬────┐
+    ▼    ▼    ▼    ▼    ▼    ▼    ▼        7 independent requests
+  Exec LinkedIn X Advisory Deck Info Video  (one failure ≠ total failure)
+    └────┴────┴──┬─┴────┴────┴────┘
+                 ▼
+          VALIDATION   evidence IDs resolve? figures in source?
+                 │     qualifiers preserved?
+                 ▼
+          RENDER   deterministic code — no model call
+                 ▼
+   .pptx · .svg · .mp4 · .zip · .md  +  provenance.json (SHA-256 chain)
 ```
 
-### Stack and rationale
+## 3. Three guarantees
 
-| Layer | Choice | Why |
+**Consistency.** Extraction and fact analysis run *once*; every format reads the same ledger.
+Independent generation is what causes drift, so the architecture removes the independence.
+
+**Exactness.** The model returns structured JSON against a Zod schema. Slides, SVG and every video
+frame are drawn by application code — a model is never asked to render a figure, so it cannot render
+one wrongly. Exports make no model call, so an export cannot fail because a provider is down.
+
+**Meaning.** A numeric check catches a figure that changed; it is blind to a figure that stayed while
+the certainty around it did not. `lib/meaningDrift.ts` pairs each cited output block with its source
+passage and reports a **dropped qualifier** as a warning (source says *"preliminary"*, output does
+not) and an **escalated claim** as an error (*"some"* → *"all"*, *"unconfirmed"* → *"confirmed"*).
+Deterministic, negation-aware string analysis — no model is asked whether the meaning changed,
+because that answer could not be verified.
+
+## 4. Stack
+
+| Layer | Choice | Rationale |
 | --- | --- | --- |
-| Framework | Next.js 16 + React 19 + TypeScript | One deployable unit; server routes keep the key off the client |
-| Styling | Tailwind CSS 4 | Consistent spacing and colour without a separate design system |
-| PDF text | `unpdf` | Returns **per-page** text, which the evidence model depends on; verified on Node 24 before adoption |
-| Provider | Gemini via `@google/genai` | Free tier needs no billing; a fallback model chain absorbs free-tier `503` spikes |
-| Schemas | Zod 4 | One definition drives both the provider's structured-output schema and server-side validation |
-| PPTX | `PptxGenJS` | Maintained, Node-compatible; output verified by inspecting OOXML parts |
-| Infographic | Hand-written SVG templates | Deterministic, escapable, and identical in preview and download |
-| Persistence | None | Not justified at prototype scope; the UI says so rather than implying otherwise |
+| Application | Next.js 16 · React 19 · TypeScript | One deployable unit; credentials stay server-side |
+| Schemas | Zod 4 | One definition drives structured output *and* validation |
+| PDF text | `unpdf` | Per-page text, which the evidence model depends on |
+| Deck / infographic | `PptxGenJS` · hand-written SVG | Native editable charts; deterministic output |
+| Video | `@resvg/resvg-js` + ffmpeg | Frames drawn locally; provider TTS gives narration only |
+| Providers | Groq, then Google Gemini | Separate allowances; order chosen by measurement |
 
-A separate Python backend, PostgreSQL, Redis, a queue and a vector database were all considered and
-rejected: none is justified by the actual requirements at this scope, and each would consume time
-that the interaction quality needed.
+No database, queue or vector store — none is justified at this scope.
 
----
+## 5. Evidence and provenance
 
-## Page 2 — Data flow, evidence, validation, limitations
+Every passage carries a stable ID (`src-<hash>-p<page>-<n>`). Generated content cites those IDs, the
+server resolves them and **discards any the model invented**, and clicking a claim opens the exact
+passage behind it.
 
-### Data flow
+Each export ships `provenance.json`: a SHA-256 chain over the source text, the fact ledger and every
+artefact, each entry sealed over the one before it. Altering any recorded content breaks verification
+at that entry and identifies which.
 
-1. **Ingest.** Size and type are validated. Oversized input is **rejected with an explanation**, never
-   silently truncated. A PDF with no text layer anywhere is reported as scanned and unsupported;
-   individual blank pages produce a warning naming those pages.
-2. **Reflow and segment.** PDF extraction returns one line per *rendered* line, so a paragraph
-   arrives in fragments. Lines that clearly continue the previous one are rejoined (hyphenated word
-   splits included) while genuine breaks and headings are preserved — this improves both the preview
-   and what the model reads. Text is then split into passage-sized segments on heading boundaries and
-   a length target, each with a stable ID (`src-<base36>-p<page>-<n>`). A line carrying several
-   figures is treated as tabular data, not a heading, which keeps a results table whole as one
-   evidence unit.
-3. **Analyse.** One call produces the **fact ledger**: topic, claims with figures, units, dates and
-   caveats, named entities, actions explicitly present in the source, and information the source does
-   *not* contain. Evidence IDs that do not match a real segment are removed, and the removal is
-   reported in the ledger's warnings rather than hidden.
-4. **Generate.** One request per selected format, at most two concurrently. Each receives the same
-   source, the same ledger and the same brief, plus format-specific instructions. A presentation is
-   designed as slides; it is not a summary cut into bullets.
-5. **Validate.** Structural checks run server-side (below).
-6. **Review and edit.** Edits are stored separately from generated content. Regeneration warns before
-   replacing an edit.
-7. **Export.** Pure renderers, no model call. An export therefore cannot fail because of the provider,
-   and always renders the operator's current version.
+> This is a **hash chain, not a blockchain**. It establishes integrity and ordering. It does not
+> prove the source document was authentic, and nothing is anchored to an external ledger — stated
+> plainly in the file itself and in both READMEs.
 
-### Deterministic layout
+## 6. Security and reliability
 
-The model chooses **which** layout suits each slide and each infographic; the application decides
-what that layout looks like and draws it. `lib/export/slideLayout.ts` and
-`lib/export/infographicLayout.ts` hold that decision, shared by the exporter, the browser preview
-and the validator, so none of the three can disagree about what is on the page.
+Credentials are read in **one file** (`lib/provider.ts`, `server-only`) and never reach the browser.
+Source content is **data, never instructions** — uploaded text is fenced and marked as data, so
+directives inside a document are treated as quoted content; covered by tests. URL fetching resolves
+and screens every host against private, loopback, link-local and CGNAT ranges **before each request
+and after every redirect**, reading bodies against a running byte cap. Uploads are size- and
+type-checked before being read.
 
-A requested layout the content cannot support is refused rather than drawn empty: a chart with one
-value, a donut of negative values, a headline figure with no figure. Each falls back to a layout
-the content does support, ending at the qualitative one, which needs nothing but words.
+Text generation walks one chain across two providers, ordered by **measurement, not tier**: every
+candidate was benchmarked against the real schemas for schema validity, figure preservation and
+qualifier retention, and two were removed on evidence — one reproduced half the source figures across
+repeated runs, another took 180 seconds and returned invalid JSON. Each call runs under a deadline, a
+refusing model enters a process-wide cooldown so seven formats do not each rediscover it, a stated
+rate-limit delay is honoured rather than guessed, and a request larger than a model's allowance
+rotates immediately rather than retrying what cannot succeed.
 
-Charts are native PowerPoint chart parts and hand-drawn SVG, built from values the model supplies
-as data. Those values are checked against the source exactly like prose figures — an invented
-number is caught whether it was written in a sentence or plotted on an axis.
+## 7. Scope — what this does *not* do
 
-### Rendered video
+Stated because the interface is not permitted to imply otherwise.
 
-Where ffmpeg is available, a video package can be rendered to MP4. The provider speaks each
-scene’s narration; the application draws every frame; ffmpeg composites the two.
+- **No fact verification.** Validation is structural: IDs resolve, figures appear in the source,
+  qualifiers survive, content fits its layout. It does not check whether content is *true*.
+- **No OCR.** Scanned PDFs are refused with a clear message. Images are read by a vision model — a
+  transcription, not an extraction — and labelled as such.
+- **No generative imagery or video.** Frames are drawn by code: a generative model cannot be trusted
+  with a figure, and in a video the viewer cannot check it.
+- **No confidence scores, persistence, accounts or approval workflow.** Any confidence number shown
+  would be invented; work lives in the browser tab.
 
-No image or video model is involved, and that is the point. A generative model cannot be relied on
-to render “18%” as “18%”, and in a video the viewer has no way to check it — so the frames are drawn
-by the same deterministic code that draws the infographic.
+## 8. Verification and deployment
 
-Speaking the narration also removes a caveat rather than adding a feature. The provider returns raw
-PCM, so each scene’s true duration follows from the byte count exactly. The subtitles shipped with
-the MP4 are therefore aligned to real audio, where the `.zip` package’s remain estimates derived
-from narration length and are labelled as such.
-
-ffmpeg is a host capability, not a dependency the app can guarantee: when it is missing the export
-reports that plainly, names the fix, and points at the package export that still works.
-
-### Evidence handling
-
-Every factual element carries an `evidence` array of segment IDs. The system message lists the valid
-IDs for the current source and forbids inventing them. On return, IDs are checked against the real
-segment set:
-
-- Valid IDs become clickable references that open the **stored source text** — not a re-summary.
-- Invalid IDs are reported as an error-severity finding and excluded from the evidence panel.
-- In creative mode there is no source, so citations are forbidden outright and any that appear are
-  discarded with a warning.
-
-Evidence links show *where content came from*. They are a review aid. They do not establish that the
-content interprets the source correctly, and the interface says so.
-
-### Validation
-
-| Check | Severity | Note |
-| --- | --- | --- |
-| Evidence ID does not resolve | error | Excluded from the panel |
-| Grounded artefact cites nothing | warning | |
-| Figure absent from the source | warning | Normalised so `18%` matches `18.0%`; structural numbers such as scene durations and slide indices are excluded |
-| Text likely to overflow the export layout | warning | Thresholds match the real renderer |
-| X post over the character limit | warning | Counts labelled approximate |
-| Infographic with no statistics | info | Expected — a qualitative layout is used rather than invented figures |
-| Video package | info | Timings labelled estimates |
-
-Malformed model output triggers **one** repair attempt with the validation errors fed back. A second
-failure marks that format failed and retryable; other formats are untouched.
-
-Transport failures are handled separately from schema failures. Free-tier capacity fluctuates, so a
-`503 high demand` response rotates to the next model in the fallback chain rather than simply
-waiting; permanent failures (rejected key, retired model name) fail immediately instead of retrying.
-The result reports which model actually answered, and the header badge shows it.
-
-### Security and data handling
-
-- The API key is read only inside `lib/provider.ts`, which is `server-only`. It never reaches the
-  browser and is never placed in browser storage.
-- Source text is fenced as data and the model is instructed to ignore directives within it. This
-  boundary is covered by tests using deliberately hostile source text.
-- No model-generated HTML or SVG is rendered. The infographic preview is our own renderer's output,
-  with every text value XML-escaped.
-- Source content is sent to Google's Gemini API. The README states this plainly; no claim of
-  local-only processing is made.
-
-### Limitations
-
-No OCR. No rendered video or audio. No factual verification. No persistence, accounts or
-collaboration. Multilingual output is generated but not quality-assured. Input is bounded rather than
-chunked; oversized documents are rejected with an explanation instead of partially processed.
-
-### Deployment
-
-`npm run build` produces a standard Next.js server application (Node runtime required for PDF and
-PPTX generation; these routes are not edge-compatible). A `Dockerfile` is included, and the app
-deploys as-is to any Node host with `GEMINI_API_KEY` supplied as a server-side environment variable.
-`samples/` is read at runtime by `/api/sample` and is declared in `outputFileTracingIncludes` so it
-survives traced deployments. Generation latency is provider-bound; concurrency is capped at two
-in-flight requests to respect free-tier rate limits.
-
-One field note worth recording: endpoint-security software on Windows was observed silently
-returning `204 No Content` for **binary** GET responses from localhost, which broke loading the
-sample PDF over HTTP with no visible cause. `/api/sample` therefore reads and extracts the file
-server-side and returns JSON, so no binary crosses to the browser. POST responses — including every
-export — were unaffected.
-
-### Roadmap
-
-OCR and DOCX ingestion · section-level regeneration with locked sections · source-change impact
-tracking (detect changed facts, mark affected sections stale, regenerate only those) · tested
-Indian-language support with glossaries and numeric fidelity · durable projects with version history
-and reviewer approval · template-based rendered video with captions aligned to real audio.
+**247 automated tests** run without an API key, covering extraction, schema validation, evidence
+resolution, meaning drift, the provenance chain, prompt-injection boundaries, SSRF screening and
+every renderer. Exports are checked further by inspecting the produced OOXML and SVG, and by probing
+rendered video for valid H.264/AAC streams. Deploys as a single Next.js container; ffmpeg on the host
+enables MP4 rendering, and without it the application says so and offers the video package instead.
