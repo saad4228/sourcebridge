@@ -8,7 +8,7 @@
  * representation from the one they reviewed.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { cx } from './ui';
 
 /** Immutable set-by-path. Used so an edit never mutates generated content. */
@@ -102,12 +102,85 @@ export function EditableText({
   return <Tag className={className}>{value}</Tag>;
 }
 
+/**
+ * Add and remove for a list whose items are objects rather than strings.
+ *
+ * EditableList below covers plain string arrays. The richer lists -- a slide's
+ * key messages, an infographic's statistics, a deck's slides -- are arrays of
+ * objects with their own sub-fields, so the caller keeps rendering each row
+ * and this only supplies the two controls that were missing: remove on a row,
+ * and add at the end.
+ *
+ * `blank` builds the new item. It must satisfy the schema, because an added
+ * row is exported and validated like any other.
+ */
+export function EditableRows<T>({
+  items,
+  editing,
+  onChange,
+  label,
+  blank,
+  max,
+  children,
+}: {
+  items: T[];
+  editing: boolean;
+  onChange: (next: T[]) => void;
+  /** Singular and lower case, e.g. "key message". Used in the control labels. */
+  label: string;
+  blank: () => T;
+  /** Beyond this the format's own layout breaks, so adding stops. */
+  max?: number;
+  children: (item: T, index: number) => ReactNode;
+}) {
+  if (!editing) return <>{items.map((item, i) => children(item, i))}</>;
+
+  const atLimit = max !== undefined && items.length >= max;
+
+  return (
+    <>
+      {items.map((item, i) => (
+        <div key={i} className="relative">
+          {children(item, i)}
+          <button
+            type="button"
+            onClick={() => onChange(items.filter((_, j) => j !== i))}
+            aria-label={`Remove ${label} ${i + 1}`}
+            className={cx(
+              'mt-1 rounded px-1.5 py-0.5 text-[11px] text-[var(--color-ink-faint)]',
+              'hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)]',
+            )}
+          >
+            Remove {label}
+          </button>
+        </div>
+      ))}
+      <button
+        type="button"
+        disabled={atLimit}
+        onClick={() => onChange([...items, blank()])}
+        title={atLimit ? `The layout holds at most ${max}.` : undefined}
+        className={cx(
+          'self-start rounded px-1.5 py-0.5 text-xs font-medium',
+          atLimit
+            ? 'cursor-not-allowed text-[var(--color-ink-faint)]'
+            : 'text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]',
+        )}
+      >
+        + Add {label}
+        {atLimit ? ` (max ${max})` : ''}
+      </button>
+    </>
+  );
+}
+
 /** An editable list of plain strings, with add and remove in edit mode. */
 export function EditableList({
   items,
   editing,
   onChange,
   label,
+  max,
   itemClassName,
   listClassName,
 }: {
@@ -115,6 +188,8 @@ export function EditableList({
   editing: boolean;
   onChange: (next: string[]) => void;
   label: string;
+  /** Beyond this the format's renderer trims, so adding stops here instead. */
+  max?: number;
   itemClassName?: string;
   listClassName?: string;
 }) {
@@ -152,10 +227,18 @@ export function EditableList({
       ))}
       <button
         type="button"
+        disabled={max !== undefined && items.length >= max}
         onClick={() => onChange([...items, ''])}
-        className="self-start rounded px-1.5 py-0.5 text-xs font-medium text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]"
+        title={max !== undefined && items.length >= max ? `The layout holds at most ${max}.` : undefined}
+        className={cx(
+          'self-start rounded px-1.5 py-0.5 text-xs font-medium',
+          max !== undefined && items.length >= max
+            ? 'cursor-not-allowed text-[var(--color-ink-faint)]'
+            : 'text-[var(--color-accent)] hover:bg-[var(--color-accent-soft)]',
+        )}
       >
         + Add {label.toLowerCase()}
+        {max !== undefined && items.length >= max ? ` (max ${max})` : ''}
       </button>
     </div>
   );

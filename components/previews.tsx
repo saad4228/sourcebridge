@@ -9,7 +9,7 @@
  */
 
 import { useMemo, useState } from 'react';
-import { EditableList, EditableText, setIn } from './editable';
+import { EditableList, EditableRows, EditableText, setIn } from './editable';
 import { Badge, cx } from './ui';
 import { renderInfographicSvg } from '@/lib/export/svg';
 import { resolveLayout, type Slide, type SlideLayout } from '@/lib/export/slideLayout';
@@ -805,19 +805,25 @@ function SlideBody({
       );
 
     default:
-      return (
+      // In edit mode this becomes a list with add and remove, because a slide
+      // whose points cannot be added to is only half editable. The cap matches
+      // the renderer: beyond five the bullets overflow the layout.
+      return editing ? (
+        <div className="flex flex-col gap-1">
+          <EditableList
+            items={slide.bullets ?? []}
+            editing
+            label={`Slide ${index + 1} bullet`}
+            max={5}
+            onChange={(next) => set(['slides', index, 'bullets'], next)}
+          />
+        </div>
+      ) : (
         <ul className="space-y-1">
           {slide.bullets?.map((bullet, j) => (
             <li key={j} className="flex gap-1.5">
               <span className="mt-1.5 h-0.5 w-0.5 shrink-0 rounded-full bg-[var(--color-paper-muted)]" />
-              <EditableText
-                as="span"
-                label={`Slide ${index + 1} bullet ${j + 1}`}
-                value={bullet}
-                editing={editing}
-                onChange={(v) => set(['slides', index, 'bullets', j], v)}
-                className={cx('text-[10px] leading-snug', PAPER_MUTED)}
-              />
+              <span className={cx('text-[10px] leading-snug', PAPER_MUTED)}>{bullet}</span>
             </li>
           ))}
         </ul>
@@ -964,25 +970,48 @@ function InfographicPreview({ content, editing, onChange, onEvidence }: PreviewP
         {infographicLayout === 'stats' && (
           <div>
             <p className={SECTION_LABEL}>Statistics</p>
-            <ul className="mt-1.5 space-y-2">
-              {content.statistics.map((stat, i) => (
-                <li key={i} className="flex items-baseline gap-2">
-                  <span className="font-mono text-sm font-semibold text-[var(--color-accent)]">
-                    {stat.value}
-                    {stat.unit}
-                  </span>
-                  <EditableText
-                    as="span"
-                    label={`Statistic ${i + 1} caption`}
-                    value={stat.caption}
-                    editing={editing}
-                    onChange={(v) => set(['statistics', i, 'caption'], v)}
-                    className="flex-1 text-xs text-[var(--color-ink-muted)]"
-                  />
-                  <EvidenceChip ids={stat.evidence} onEvidence={onEvidence} />
-                </li>
-              ))}
-            </ul>
+            <div className="mt-1.5 flex flex-col gap-2">
+              <EditableRows
+                items={content.statistics}
+                editing={editing}
+                label="statistic"
+                max={3}
+                blank={() => ({ value: '', unit: '', caption: '', evidence: [] })}
+                onChange={(next) => set(['statistics'], next)}
+              >
+                {(stat, i) => (
+                  <div key={i} className="flex items-baseline gap-2">
+                    <EditableText
+                      as="span"
+                      label={`Statistic ${i + 1} value`}
+                      value={stat.value}
+                      editing={editing}
+                      onChange={(v) => set(['statistics', i, 'value'], v)}
+                      placeholder="value"
+                      className="w-16 font-mono text-sm font-semibold text-[var(--color-accent)]"
+                    />
+                    <EditableText
+                      as="span"
+                      label={`Statistic ${i + 1} unit`}
+                      value={stat.unit ?? ''}
+                      editing={editing}
+                      onChange={(v) => set(['statistics', i, 'unit'], v)}
+                      placeholder="unit"
+                      className="w-10 font-mono text-sm font-semibold text-[var(--color-accent)]"
+                    />
+                    <EditableText
+                      as="span"
+                      label={`Statistic ${i + 1} caption`}
+                      value={stat.caption}
+                      editing={editing}
+                      onChange={(v) => set(['statistics', i, 'caption'], v)}
+                      className="flex-1 text-xs text-[var(--color-ink-muted)]"
+                    />
+                    <EvidenceChip ids={stat.evidence} onEvidence={onEvidence} />
+                  </div>
+                )}
+              </EditableRows>
+            </div>
           </div>
         )}
 
@@ -1042,30 +1071,39 @@ function InfographicPreview({ content, editing, onChange, onEvidence }: PreviewP
 
         <div>
           <p className={SECTION_LABEL}>Key messages</p>
-          <ul className="mt-1.5 space-y-2">
-            {content.keyMessages.map((message, i) => (
-              <li key={i}>
-                <div className="flex items-baseline gap-2">
+          <div className="mt-1.5 flex flex-col gap-2">
+            <EditableRows
+              items={content.keyMessages}
+              editing={editing}
+              label="key message"
+              max={4}
+              blank={() => ({ label: '', detail: '', evidence: [] })}
+              onChange={(next) => set(['keyMessages'], next)}
+            >
+              {(message, i) => (
+                <div key={i}>
+                  <div className="flex items-baseline gap-2">
+                    <EditableText
+                      as="span"
+                      label={`Message ${i + 1} label`}
+                      value={message.label}
+                      editing={editing}
+                      onChange={(v) => set(['keyMessages', i, 'label'], v)}
+                      className="text-xs font-semibold text-[var(--color-ink)]"
+                    />
+                    <EvidenceChip ids={message.evidence} onEvidence={onEvidence} />
+                  </div>
                   <EditableText
-                    as="span"
-                    label={`Message ${i + 1} label`}
-                    value={message.label}
+                    label={`Message ${i + 1} detail`}
+                    value={message.detail}
                     editing={editing}
-                    onChange={(v) => set(['keyMessages', i, 'label'], v)}
-                    className="text-xs font-semibold text-[var(--color-ink)]"
+                    onChange={(v) => set(['keyMessages', i, 'detail'], v)}
+                    className="text-xs leading-relaxed text-[var(--color-ink-muted)]"
                   />
-                  <EvidenceChip ids={message.evidence} onEvidence={onEvidence} />
                 </div>
-                <EditableText
-                  label={`Message ${i + 1} detail`}
-                  value={message.detail}
-                  editing={editing}
-                  onChange={(v) => set(['keyMessages', i, 'detail'], v)}
-                  className="text-xs leading-relaxed text-[var(--color-ink-muted)]"
-                />
-              </li>
-            ))}
-          </ul>
+              )}
+            </EditableRows>
+          </div>
         </div>
 
         <div>
