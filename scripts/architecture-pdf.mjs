@@ -109,7 +109,8 @@ const html = `<!doctype html><meta charset="utf-8"><style>
   h2 { font-size: 11.5pt; margin: 11pt 0 4pt; }
   p, li { margin: 3.5pt 0; }
   ul { margin: 3pt 0; padding-left: 15pt; }
-  pre { font: 7pt/1.18 Consolas, monospace; background: #f6f6f6; padding: 6pt; margin: 6pt 0; }
+  pre { font: 8.4pt/1.3 Consolas, monospace; background: #f7f8fa; padding: 8pt 10pt; margin: 7pt 0;
+        border: 1px solid #e3e6ea; }
   table { border-collapse: collapse; width: 100%; font-size: 8.5pt; margin: 5pt 0; }
   th, td { border: 1px solid #ccc; padding: 2.5pt 4pt; text-align: left; vertical-align: top; }
   blockquote { margin: 5pt 0; padding-left: 8pt; border-left: 2px solid #888; font-size: 9pt; }

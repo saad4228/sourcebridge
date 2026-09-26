@@ -2,6 +2,12 @@
 
 **SIH 2026 · Problem statement 26154 · Theme: Blockchain & Cybersecurity**
 
+| | |
+| --- | --- |
+| **Team** | _«team name»_ |
+| **Team ID** | _«team id»_ |
+| **Members** | _«member 1» · «member 2» · «member 3» · «member 4» · «member 5» · «member 6»_ |
+
 One source document becomes seven audience-specific communication artefacts sharing a single factual
 foundation, with every claim traceable to the passage it came from.
 
@@ -16,22 +22,31 @@ answer is independent. The architecture, not the model, is what prevents it.
 ## 2. Pipeline
 
 ```
- SOURCE   PDF · image · video · URL · text ──► extracted per page,
-    │                                          segmented into passages
-    ▼                                          with stable IDs
- FACT LEDGER   facts · figures+units · dates · entities · CAVEATS
-    │          ONE analysis pass, each entry carrying its segment IDs
-    ├────┬────┬────┬────┬────┬────┐
-    ▼    ▼    ▼    ▼    ▼    ▼    ▼        7 independent requests
-  Exec LinkedIn X Advisory Deck Info Video  (one failure ≠ total failure)
-    └────┴────┴──┬─┴────┴────┴────┘
-                 ▼
-          VALIDATION   evidence IDs resolve? figures in source?
-                 │     qualifiers preserved?
-                 ▼
-          RENDER   deterministic code — no model call
-                 ▼
-   .pptx · .svg · .mp4 · .zip · .md  +  provenance.json (SHA-256 chain)
+   ┌──────────────────────────────────────────────────────────────┐
+   │  SOURCE      PDF · image · video · URL · pasted text         │
+   └───────────────────────────┬──────────────────────────────────┘
+                               │   extracted per page, split into
+                               ▼   passages with stable IDs
+   ┌──────────────────────────────────────────────────────────────┐
+   │  FACT LEDGER     facts · figures + units · dates · CAVEATS   │
+   │                  ONE analysis pass, shared by every format   │
+   └───────────────────────────┬──────────────────────────────────┘
+                               │   seven independent requests,
+                               ▼   so one failure is not total
+   ┌──────────────────────────────────────────────────────────────┐
+   │  GENERATE    Executive summary · LinkedIn · X thread ·       │
+   │              Advisory · Presentation · Infographic · Video   │
+   └───────────────────────────┬──────────────────────────────────┘
+                               ▼
+   ┌──────────────────────────────────────────────────────────────┐
+   │  VALIDATE    evidence IDs resolve? · figures in the source?  │
+   │              qualifiers preserved?                           │
+   └───────────────────────────┬──────────────────────────────────┘
+                               ▼
+   ┌──────────────────────────────────────────────────────────────┐
+   │  RENDER      deterministic code — no model call              │
+   │  .pptx · .svg · .mp4 · .zip · .md + provenance.json (SHA-256)│
+   └──────────────────────────────────────────────────────────────┘
 ```
 
 ## 3. Three guarantees
@@ -74,38 +89,31 @@ artefact, each entry sealed over the one before it. Altering any recorded conten
 at that entry and identifies which.
 
 > This is a **hash chain, not a blockchain**. It establishes integrity and ordering. It does not
-> prove the source document was authentic, and nothing is anchored to an external ledger — stated
-> plainly in the file itself and in both READMEs.
+> prove the source document was authentic, and nothing is anchored to an external ledger.
 
 ## 6. Security and reliability
 
-Credentials are read in **one file** (`lib/provider.ts`, `server-only`) and never reach the browser.
-Source content is **data, never instructions** — uploaded text is fenced and marked as data, so
-directives inside a document are treated as quoted content; covered by tests. URL fetching resolves
-and screens every host against private, loopback, link-local and CGNAT ranges **before each request
-and after every redirect**, reading bodies against a running byte cap. Uploads are size- and
-type-checked before being read.
+Credentials are read in **one file** and never reach the browser. Source content is **data, never
+instructions** — uploaded text is fenced and marked as data, so directives inside a document are
+treated as quoted content; covered by tests. URL fetching screens every host against private,
+loopback, link-local and CGNAT ranges **before each request and after every redirect**, reading
+bodies against a running byte cap. Uploads are size- and type-checked before being read.
 
 Text generation walks one chain across two providers, ordered by **measurement, not tier**: every
-candidate was benchmarked against the real schemas for schema validity, figure preservation and
-qualifier retention, and two were removed on evidence — one reproduced half the source figures across
-repeated runs, another took 180 seconds and returned invalid JSON. Each call runs under a deadline, a
-refusing model enters a process-wide cooldown so seven formats do not each rediscover it, a stated
-rate-limit delay is honoured rather than guessed, and a request larger than a model's allowance
-rotates immediately rather than retrying what cannot succeed.
+candidate was benchmarked against the real schemas, and two were removed on evidence — one
+reproduced half the source figures across repeated runs, another took 180 seconds and returned
+invalid JSON. Each call runs under a deadline, a refusing model enters a process-wide cooldown, and a
+request larger than a model's allowance rotates immediately rather than retrying what cannot succeed.
 
 ## 7. Scope — what this does *not* do
 
-Stated because the interface is not permitted to imply otherwise.
-
 - **No fact verification.** Validation is structural: IDs resolve, figures appear in the source,
-  qualifiers survive, content fits its layout. It does not check whether content is *true*.
-- **No OCR.** Scanned PDFs are refused with a clear message. Images are read by a vision model — a
-  transcription, not an extraction — and labelled as such.
+  qualifiers survive. It does not check whether content is *true*.
+- **No OCR.** Scanned PDFs are refused. Images are read by a vision model — a transcription, not an
+  extraction — and labelled as such.
 - **No generative imagery or video.** Frames are drawn by code: a generative model cannot be trusted
   with a figure, and in a video the viewer cannot check it.
-- **No confidence scores, persistence, accounts or approval workflow.** Any confidence number shown
-  would be invented; work lives in the browser tab.
+- **No confidence scores, persistence or accounts.** Any confidence number shown would be invented.
 
 ## 8. Verification and deployment
 
@@ -113,4 +121,4 @@ Stated because the interface is not permitted to imply otherwise.
 resolution, meaning drift, the provenance chain, prompt-injection boundaries, SSRF screening and
 every renderer. Exports are checked further by inspecting the produced OOXML and SVG, and by probing
 rendered video for valid H.264/AAC streams. Deploys as a single Next.js container; ffmpeg on the host
-enables MP4 rendering, and without it the application says so and offers the video package instead.
+enables MP4 rendering, and without it the application offers the video package instead.
