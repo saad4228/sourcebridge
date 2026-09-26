@@ -44,7 +44,9 @@ export interface HealthStatus {
 
 export async function checkHealth(): Promise<HealthStatus> {
   try {
-    const response = await fetch('/api/health', { cache: 'no-store' });
+    // deep=1 performs the real provider round trip. Bare /api/health stays
+    // cheap so a platform health check cannot spend the allowance.
+    const response = await fetch('/api/health?deep=1', { cache: 'no-store' });
     return (await response.json()) as HealthStatus;
   } catch {
     return {
