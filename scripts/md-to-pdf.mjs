@@ -1,21 +1,31 @@
 /**
- * Render docs/ARCHITECTURE.md to an A4 PDF and report its page count.
+ * Render a Markdown document to an A4 PDF and report its page count.
  *
- * The submission caps the document at two pages, and a word count does not
- * predict that: the pipeline diagram and the tables take far more vertical
- * space per word than prose. This renders the real thing and counts, so the
- * limit is checked rather than estimated.
+ * Used for the documents that leave the repository -- the architecture paper,
+ * which the submission caps at two pages, and the project guide that gets
+ * shared as a file. A word count does not predict the page count, because
+ * diagrams and tables take far more vertical space per word than prose, so
+ * this renders the real thing and counts the page objects.
  *
- *   node scripts/architecture-pdf.mjs [out.pdf]
+ *   node scripts/md-to-pdf.mjs <input.md> [output.pdf] [--max-pages N]
  *
+ * Exits non-zero when a stated page limit is exceeded, so a check can fail.
  * Needs Microsoft Edge, which the screenshot scripts already rely on.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
 
-const SOURCE = 'docs/ARCHITECTURE.md';
-const OUT = process.argv[2] ?? 'docs/ARCHITECTURE.pdf';
+const args = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+const maxFlag = process.argv.find((a) => a.startsWith('--max-pages='));
+const MAX_PAGES = maxFlag ? Number(maxFlag.split('=')[1]) : undefined;
+
+const SOURCE = args[0];
+if (!SOURCE) {
+  console.error('usage: node scripts/md-to-pdf.mjs <input.md> [output.pdf] [--max-pages=N]');
+  process.exit(2);
+}
+const OUT = args[1] ?? SOURCE.replace(/.md$/, '.pdf');
 
 const md = fs.readFileSync(SOURCE, 'utf8').split('\r\n').join('\n');
 const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -95,8 +105,22 @@ function toHtml(src) {
       continue;
     }
 
-    const para = [];
-    while (i < lines.length && lines[i].trim() && !/^[#>|`-]/.test(lines[i])) para.push(lines[i++]);
+    // Always consume the current line before testing the next. Written as a
+    // pure look-ahead, a line that began with a character this branch excludes
+    // -- an inline code span at the start of a paragraph, for instance -- was
+    // matched by no branch at all, the index never advanced, and the loop
+    // filled memory with empty paragraphs until the process died.
+    const para = [lines[i++]];
+    while (
+      i < lines.length &&
+      lines[i].trim() &&
+      !/^[#>|]/.test(lines[i]) &&
+      !lines[i].startsWith('```') &&
+      !/^[-*]\s+/.test(lines[i]) &&
+      !/^---+$/.test(lines[i])
+    ) {
+      para.push(lines[i++]);
+    }
     out.push(`<p>${inline(para.join(' '))}</p>`);
   }
   return out.join('\n');
@@ -137,5 +161,11 @@ const words = md.split(/\s+/).filter(Boolean).length;
 
 console.log(`wrote ${OUT}`);
 console.log(`${words} words · ${pages} A4 page${pages === 1 ? '' : 's'}`);
-console.log(pages <= 2 ? 'within the two-page limit' : `OVER the limit by ${pages - 2}`);
-process.exitCode = pages <= 2 ? 0 : 1;
+
+if (MAX_PAGES === undefined) process.exit(0);
+if (pages <= MAX_PAGES) {
+  console.log(`within the ${MAX_PAGES}-page limit`);
+} else {
+  console.error(`OVER the ${MAX_PAGES}-page limit by ${pages - MAX_PAGES}`);
+  process.exitCode = 1;
+}

@@ -78,7 +78,7 @@ If ffmpeg lives somewhere unusual, set `FFMPEG_PATH` to the binary.
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
 | `npm run smoke <outDir> <file.pdf>` | Live end-to-end check against a running server (uses your key) |
-| `node scripts/architecture-pdf.mjs` | Render `docs/ARCHITECTURE.md` to PDF and check the page limit |
+| `node scripts/md-to-pdf.mjs <in.md> [out.pdf]` | Render a doc to A4 PDF; add `--max-pages=N` to enforce a limit |
 
 ---
 
