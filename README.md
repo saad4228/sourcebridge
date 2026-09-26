@@ -206,16 +206,32 @@ whether the source itself is trustworthy. The application does not claim any of 
 
 ## Deployment
 
-A single Next.js container. Supply the keys as server-side environment variables — never bake them
-into an image.
+A single Next.js container. The image installs **ffmpeg**, which is the reason to deploy it as a
+container rather than serverless: without ffmpeg the MP4 export is unavailable, and the application
+says so and offers the video package instead.
 
 ```bash
 docker build -t sourcebridge .
 docker run -e GROQ_API_KEY=... -e GEMINI_API_KEY=... -p 3000:3000 sourcebridge
 ```
 
-On a serverless host everything works except the rendered `.mp4`, which needs ffmpeg on the host. The
-application detects its absence and offers the video package instead.
+**Keys are supplied at run time and never baked into the image.** `.dockerignore` excludes `.env*`
+so a local key file cannot be copied into a layer. On a host, set them as environment variables in
+the dashboard — not in a committed file.
+
+### Choosing a host
+
+| Host | MP4 export | Notes |
+| --- | --- | --- |
+| **Render**, **Railway**, **Fly.io** | ✅ | Deploy from the Dockerfile; free tiers sleep when idle |
+| **A VPS** | ✅ | Full control; you manage TLS and restarts |
+| **Vercel** | ❌ | Everything else works; no ffmpeg on the platform |
+
+Set `PORT` if the host requires a specific one — the image reads it, and binds `0.0.0.0` already.
+
+> **A public URL exposes your quota.** There are no accounts, so anyone with the link can generate
+> and spend your free-tier allowance. For a demo, keep the URL unlisted rather than indexed. If it
+> needs to be public for longer, add rate limiting by IP first.
 
 ---
 
