@@ -7,45 +7,82 @@ source once, builds a shared ledger of its facts, figures and caveats, then writ
 format from that same foundation — so the numbers and the qualifications stay consistent across all
 of them, and every claim links back to the passage it came from.
 
-Built for SIH 2026, problem statement 26154.
+Built for **SIH 2026, problem statement 26154** (Theme: Blockchain & Cybersecurity) by **Team BYTE ME**.
 
 ---
 
-## What is implemented
+## Quick start
 
-| Capability | Status |
+```bash
+git clone https://github.com/saad4228/sourcebridge.git
+cd sourcebridge
+npm install
+cp .env.example .env.local     # then add at least one API key — see below
+npm run dev
+```
+
+Open <http://localhost:3000> and press **Try the sample incident report**. No upload needed — a
+bundled synthetic report is included.
+
+### You need at least one key
+
+Both free tiers are enough. No billing setup required.
+
+| Key | Get it | What it powers |
+| --- | --- | --- |
+| `GROQ_API_KEY` | [console.groq.com/keys](https://console.groq.com/keys) | Text generation — tried first, answers in about a second |
+| `GEMINI_API_KEY` | [aistudio.google.com/apikey](https://aistudio.google.com/apikey) | Reading images and video, plus video narration |
+
+Put them in `.env.local`:
+
+```
+GROQ_API_KEY=your-key-here
+GEMINI_API_KEY=your-key-here
+```
+
+- **Both keys** → fastest, all features.
+- **Gemini only** → everything works, more slowly.
+- **Groq only** → all seven formats generate, but image and video sources are refused.
+
+`.env.local` is gitignored. **Keys are read only on the server** and never reach the browser.
+
+> **Data handling:** source content you provide is sent to Groq and/or Google for processing. This
+> is not local-only processing. Do not upload material you are not permitted to share with a
+> third-party service.
+
+### Optional: ffmpeg, for rendered video
+
+Only the `.mp4` export needs it. Everything else works without it, and the app says so rather than
+failing silently.
+
+```bash
+winget install Gyan.FFmpeg        # Windows
+brew install ffmpeg               # macOS
+sudo apt install ffmpeg           # Debian/Ubuntu
+```
+
+If ffmpeg lives somewhere unusual, set `FFMPEG_PATH` to the binary.
+
+**Requires Node.js 20+.** Developed on Node 24.18.0 / npm 11.16.0.
+
+---
+
+## Commands
+
+| Command | What it does |
 | --- | --- |
-| Paste text as a source | Implemented |
-| Upload a text-based PDF, with page numbers | Implemented |
-| Upload an image (PNG/JPEG/WebP), read by a vision model | Implemented |
-| Upload a short video (MP4/WebM/MOV), transcribed by the model | Implemented |
-| Fetch an article by URL, with SSRF protection | Implemented |
-| Indic script support in .pptx and .svg exports | Implemented |
-| Scanned / image-only PDF detection | Implemented — reported as unsupported, no OCR |
-| Paragraph reflow (rejoins lines a PDF broke mid-sentence) | Implemented |
-| Source preview with page navigation and stable passage IDs | Implemented |
-| Shared fact ledger with per-fact evidence links | Implemented |
-| Seven output formats, each with its own schema and preview | Implemented |
-| Creative draft mode (no source, from a prompt) | Implemented |
-| Inline editing of any generated artefact | Implemented |
-| Copy as plain text; copy individual X posts | Implemented |
-| Evidence inspection (click a reference, read the passage) | Implemented |
-| Per-format regeneration and retry after failure | Implemented |
-| Structural validation (invalid references, drifted figures, overflow) | Implemented |
-| Meaning-drift detection (a qualifier dropped or a claim strengthened) | Implemented |
-| Tamper-evident provenance record shipped with every bundle export | Implemented |
-| Markdown / text export for all seven formats | Implemented |
-| `.pptx` export with speaker notes | Implemented |
-| Six slide layouts, including native editable PowerPoint charts | Implemented |
-| `.svg` infographic export | Implemented |
-| Four infographic layouts (stats, chart, comparison, qualitative) | Implemented |
-| Video package `.zip` (script, storyboard, narration, SRT) | Implemented |
-| Rendered `.mp4` with spoken narration and audio-aligned subtitles | Implemented — needs ffmpeg |
-| "Download all" — every completed format in one archive | Implemented |
-| Two providers, with automatic fallback across every model in both | Implemented |
-| Light / dark theme with a header toggle | Implemented |
+| `npm run dev` | Development server on :3000 |
+| `npm run build` / `npm start` | Production build and serve |
+| `npm test` | **247 tests**, no API key required |
+| `npm run test:watch` | Tests in watch mode |
+| `npm run typecheck` | `tsc --noEmit` |
+| `npm run lint` | ESLint |
+| `npm run smoke <outDir> <file.pdf>` | Live end-to-end check against a running server (uses your key) |
+| `node scripts/architecture-pdf.mjs` | Render `docs/ARCHITECTURE.md` to PDF and check the page limit |
 
-### The seven formats
+---
+
+## The seven formats
 
 Executive summary · LinkedIn post · X post or thread · Advisory · Presentation · Infographic ·
 Video production package.
@@ -53,82 +90,49 @@ Video production package.
 Each has a real generator, its own output schema, and a preview shaped like the thing it becomes.
 None is a placeholder.
 
----
+## What makes it more than a wrapper
 
-## What is NOT implemented
+**One analysis, seven consumers.** Extraction and fact analysis run *once*. Every format reads the
+same ledger, so the figures and caveats cannot drift between them. Asking a chatbot seven times
+produces seven independent answers; this removes the independence.
 
-Stated plainly, because the interface is not allowed to imply otherwise:
+**The model never draws a figure.** It returns structured JSON against a Zod schema. Slides, SVG and
+every video frame are drawn by application code, so a model cannot render `486 Gbps` wrongly — it is
+never asked to render anything. Exports make no model call at all.
 
-- **No OCR for PDFs.** Scanned PDFs are rejected with a clear message. Images *are* supported, but
-  they are read by a vision model — a transcription, not a literal extraction — and every
-  image-sourced document carries a warning saying so.
-- **Rendered video needs ffmpeg on the host.** Where ffmpeg is present, SourceBridge speaks the
-  narration with the provider's TTS model, draws every frame with its own renderer, and composites
-  an MP4 — so on-screen figures are exact and subtitles align to the audio actually produced. Where
-  ffmpeg is absent the app says so and offers the `.zip` package instead, whose subtitle timings
-  remain **estimates** and are labelled as such. Serverless hosts generally do not provide ffmpeg.
-- **No generative video or imagery.** Frames are drawn by application code, never by an image or
-  video model. That is deliberate: a generative model cannot be trusted to render a figure
-  correctly, and in a video the viewer has no way to check it.
-- **The provenance record is a hash chain, not a blockchain.** Every bundle export carries a
-  SHA-256 chain over the source, the fact ledger and each artefact, each entry sealed over the
-  one before it, so altering any of them breaks verification at that entry. It establishes
-  integrity and ordering. It does **not** prove the source document was authentic, and nothing
-  is anchored to an external ledger.
-- **Meaning-drift detection is lexical, not semantic.** It compares the qualifiers in a cited
-  passage against the wording of the output that cites it. It catches a dropped "preliminary"
-  or a "some" that became "all". It does not understand the claim, and a faithful paraphrase
-  that abandons every qualifier family will be reported for a human to judge.
-- **No fact verification.** Validation is structural: it checks that evidence IDs resolve, that
-  figures in the output also appear in the source, and that content fits its layout. It does **not**
-  check whether the content is true or correctly interpreted.
-- **No persistence.** Work lives in the browser tab and is lost on refresh. The app warns before you
-  leave. Download anything you want to keep.
-- **No accounts, collaboration, or approval workflow.**
-- **No DOCX ingestion.**
-- **Multilingual output is generated but not quality-checked.** Non-English selections work, and the
-  exporters declare fonts covering Devanagari, Bengali, Tamil and Telugu. Rendering still depends on
-  the machine opening the file having such a font installed (Windows ships Nirmala UI). No claim is
-  made about translation quality.
-- **No confidence scores or usage metrics** — any number shown would be invented.
+**Qualifiers are checked, not assumed.** A numeric check catches a figure that changed. It is blind
+to a figure that stayed while the certainty around it did not. Meaning-drift detection reports a
+dropped *"preliminary"* as a warning and an escalated *"some"* → *"all"* as an error.
+
+Full detail in **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** (two pages).
 
 ---
 
-## Prerequisites
+## Sample workflow
 
-- **Node.js 20 or newer.** Developed and tested on Node 24.18.0 / npm 11.16.0.
-- **ffmpeg (optional).** Only needed for the rendered `.mp4` export. Everything else works
-  without it. Install with `winget install Gyan.FFmpeg`, or set `FFMPEG_PATH` to the binary.
-- **At least one provider key.** Both free tiers are sufficient — no billing setup required.
-  - [Groq](https://console.groq.com/keys) — used first for text, and answers in about a second.
-  - [Google Gemini](https://aistudio.google.com/apikey) — needed for reading image and video
-    sources and for video narration, which Groq does not do.
+1. Press **Try the sample incident report** — a synthetic preliminary cyber-incident assessment from
+   [`samples/`](samples/), rebuildable with `node scripts/build-sample-report.mjs`. Its hedged
+   wording is deliberate: it is what meaning-drift detection is demonstrated against.
+2. Review the extracted pages. Each passage shows its stable ID.
+3. The **shared fact ledger** builds automatically: claims, figures with units, dates and caveats.
+4. Choose an audience, objective, tone, language and detail level. These are instructions, not
+   labels — two outputs from the same source under different settings read differently.
+5. Select formats and **Generate**. Each runs independently, so one failure does not lose the rest.
+6. Click any evidence chip to read the source passage behind a claim.
+7. Edit anything inline, then download. Exports always use your edited version.
 
-  With both keys the app is fastest and fully featured. With Gemini alone everything works, more
-  slowly. With Groq alone every format generates, but image and video sources are refused.
+---
 
-## Installation
+## Models and quota
 
-```bash
-npm install
-cp .env.example .env.local
-```
+Text generation walks one chain across two providers: the Groq models first, then the Gemini ones.
+Groq leads because it answers in about a second where the Gemini free tier took tens of seconds, and
+because its allowance is entirely separate — a spent Gemini quota no longer stops the application.
+Reading images and video, and speaking narration, stay on Gemini, which is the only one of the two
+that does either.
 
-Then edit `.env.local` and add your keys:
-
-```
-GROQ_API_KEY=your-key-here
-GEMINI_API_KEY=your-key-here
-GEMINI_MODEL=gemini-flash-lite-latest
-```
-
-`.env.local` is gitignored. **Keys are read only on the server** and are never sent to the browser.
-
-> **Data handling:** source content you provide is sent to Groq and/or Google for processing. This
-> is not local-only processing. Do not upload material you are not permitted to share with a
-> third-party service.
-
-### How a model is chosen
+Any OpenAI-compatible endpoint can replace Groq — OpenRouter, Cerebras and GitHub Models all speak
+the same shape. Point `GROQ_BASE_URL` and `GROQ_MODELS` at one; no code changes.
 
 ### Why these models
 
@@ -142,313 +146,120 @@ does it carry every figure through unchanged, and does it keep the source's qual
 | `openai/gpt-oss-20b` | 0.6s | 4/4 | 7/7 |
 | `gemini-flash-lite-latest` | 1.9s | 4/4 | 7/7 |
 | `gemini-3.8-flash` | 7.1s | 4/4 | 7/7 |
-| `gemini-3.6-flash` | 9.5s | 4/4 | 7/7 |
 | `gemini-3.5-flash` | 17.4s | 4/4 | 7/7 |
 | `qwen/qwen3.8-27b` | 1.4s | **2/4** | 5/7 |
 | `gemma-4-26b-a4b-it` | **180s** | — | — (invalid JSON) |
 
-Two results changed the defaults. Qwen is fast and satisfies the schema, but across three runs it
-reproduced only half the source figures twice, so it is no longer in the chain: losing a figure is
-the one failure this project exists to prevent, and a model that does it intermittently is worse
-than one that is merely slower. Gemma took three minutes and then returned content that would not
-parse, so it moved from second in the fallback list to last — it stays only because it draws on a
-separate allowance and keeps the application alive once the Gemini quotas are spent.
+Two results changed the defaults. Qwen reproduced only half the source figures in two of three runs,
+so it is out of the chain: losing a figure is the one failure this project exists to prevent. Gemma
+took three minutes and returned unparseable content, so it moved to last — it stays only because it
+draws on a separate allowance and keeps the app alive once the Gemini quotas are spent.
 
-Gemini **Pro** is not available on a free key: both `gemini-3.1-pro-preview` and
-`gemini-pro-latest` answer with a quota error pointing at billing. The ceiling here is the flash
-tier, and on this task every flash model scored identically anyway — the work is transformation
-under a schema, not reasoning, so the larger models were buying nothing.
+Gemini **Pro** is not available on a free key; both Pro endpoints answer with a billing error. On
+this task every flash model scored identically anyway — the work is transformation under a schema,
+not reasoning, so a larger model buys nothing.
 
-Text generation walks one chain: the Groq models first, then the Gemini ones. Groq leads because it
-was measured answering in about a second where the Gemini free tier took tens of seconds, and
-because its allowance is entirely separate — a spent Gemini quota no longer stops the app. Reading
-images and video, and speaking video narration, stay on Gemini, which is the only one of the two
-that does either.
+### When capacity runs out
 
-Any OpenAI-compatible endpoint can take Groq's place — OpenRouter, Cerebras and GitHub Models all
-speak the same shape. Point `GROQ_BASE_URL` and `GROQ_MODELS` at one; no code changes.
+Free-tier capacity fluctuates, so four rules apply:
 
-Free-tier capacity fluctuates. A model can return `503 high demand` for a minute and be fine the
-next, or accept a request and then hang for minutes, so four rules apply:
+- **Every call runs under a deadline** (`GEMINI_TIMEOUT_MS`, 45s). One model was measured taking 261
+  seconds to answer a trivial prompt; a hang stalls everything behind it.
+- **A refusing model enters a process-wide cooldown**, rather than being rediscovered by each of the
+  seven formats in turn.
+- **A short, stated rate limit is waited out.** When the fast provider says "try again in 8 seconds",
+  doing so beats falling through to one that takes minutes.
+- **A request too large for a model rotates immediately.** If a model's whole per-minute allowance is
+  smaller than the request, retrying can never succeed.
 
-- **Every call runs under a deadline** (`GEMINI_TIMEOUT_MS`, 45s). A hanging model stalls
-  everything behind it; one was measured taking 261 seconds to answer a trivial prompt.
-- **A model that refuses work is skipped for a cooldown**, process-wide, rather than being
-  rediscovered by each of the seven formats in turn.
-- **A short, stated rate limit is waited out** rather than fallen through. When the fast provider
-  says "try again in 8 seconds", doing so beats handing the work to a provider that takes minutes.
-- **A malformed reply does not count against the model.** That is a fact about one response, not
-  about the model's health.
-
-The Gemini part of the chain includes Gemma, which draws on a separate allowance again and so keeps
-working once the Gemini daily quotas are spent. If you see *"no longer available to new users"*, set
-`GEMINI_MODEL` to a current model name. The header badge shows which model actually answered.
-
-### Free-tier daily quota
-
-The two providers meter differently, which is why using both is worth it.
-
-Gemini caps free-tier requests **per model, per day** — `gemini-3.6-flash` allows 20/day. One
-seven-format run costs about eight requests (one analysis plus one per format), so a single model
-gives roughly two runs a day. A 429 mentioning `PerDay` or `FreeTier` is a spent daily allowance,
-not a transient spike: it clears when the allowance resets, about 24 hours later.
-
-Groq caps **tokens per minute** instead. That limit clears in seconds rather than a day, and the
-app waits it out when the provider states a short delay. It is also why `GROQ_REASONING_EFFORT`
-defaults to `low`: hidden reasoning tokens count against the same allowance, and low was measured
-using about half the tokens for the same output quality.
-
-Either chain spreads load across several models, each with its own allowance.
-
-## Running locally
-
-```bash
-npm run dev
-```
-
-Open <http://localhost:3000>, then press **Try the sample report**.
-
-The header shows live provider status. <http://localhost:3000/api/health> reports whether the key is
-configured and reachable without revealing it.
-
-**After changing `.env.local`, restart the dev server** — Next.js reads environment variables at
-startup.
-
-## Commands
-
-```bash
-npm run dev         # development server
-npm run build       # production build
-npm run start       # production server (after build)
-npm test            # 220 tests, no API key required
-npm run typecheck   # TypeScript, no emit
-npm run lint        # ESLint
-npm run smoke       # live end-to-end check against a running server (uses your API key)
-npm run build:deck  # regenerate the technical presentation via SourceBridge's own exporter
-node scripts/theme-check.mjs <dir>          # capture both themes in a browser
-node scripts/render-deck.mjs <out.pptx>     # export a deck covering every slide layout
-node scripts/render-infographics.mjs <dir>  # render all four infographic layouts
-node scripts/render-video.mjs <out.mp4>     # render a video package to MP4 (uses TTS quota)
-node scripts/build-brand-mark.mjs <x0> <y0> <x1> <y1>   # regenerate icons after changing public/icon.png
-powershell -File scripts/pptx-to-png.ps1 <in.pptx> <dir>   # open a .pptx in PowerPoint, export PNGs
-```
-
----
-
-## Sample workflow
-
-1. Press **Try the sample incident report** — a synthetic preliminary cyber-incident
-   assessment from [`samples/`](samples/), rebuildable with
-   `node scripts/build-sample-report.mjs`. Its hedged wording is deliberate: it is what
-   meaning-drift detection is demonstrated against.
-2. Review the extracted pages. Each passage shows its stable ID.
-3. The **shared fact ledger** builds automatically: claims, figures with units, dates and caveats.
-4. Choose an audience (for example *General public*), an objective and a tone.
-5. Select formats and press **Generate**. Each format is a separate request, so results appear as
-   they finish and one failure never removes another format's result.
-6. Click any **source** chip to read the supporting passage, then *Show in source* to jump to it.
-7. Press **Edit** and change something. Edits are stored separately from the generated content.
-8. Download the `.pptx`, the `.svg`, or the video `.zip` — or press **Download all** for every
-   completed format in one archive. **Downloads contain your edits.**
-
-### Themes
-
-The header carries a light/dark toggle. It follows your system preference until you pick a theme,
-then remembers that choice per browser; double-click the button to go back to following the system.
-An inline script applies the stored theme before first paint, so there is no flash of the wrong
-palette on reload.
-
-Two things deliberately stay light in both themes, because they preview light documents: the slide
-cards (which preview a white `.pptx`) and the infographic (which renders the actual exported SVG).
-
-### Creative draft mode
-
-No document? On the landing page choose **Draft from a prompt instead**. SourceBridge will draft the
-same formats from your prompt alone — but with no source there is nothing to cite, so it produces no
-evidence references, marks every output *not source-verified*, and will not invent statistics or
-citations to fill the gap.
+Gemini meters **per model, per day**; Groq meters **tokens per minute** and clears in seconds. Using
+both is why one exhausted provider does not stop the application.
 
 ---
 
 ## Testing
 
 ```bash
-npm test
+npm test          # 247 tests, no API key required
 ```
 
-220 tests run without an API key:
+Covering extraction, schema validation, evidence resolution, meaning drift, the provenance chain,
+prompt-injection boundaries, SSRF screening and every renderer.
 
-- **Extraction** — page metadata, segment ID uniqueness, figures and caveats surviving extraction,
-  results tables kept whole, paragraph reflow, oversized input rejected rather than truncated,
-  scanned PDFs reported as unsupported.
-- **Validation** — invalid evidence IDs flagged, drifted figures caught (`34%` when the source says
-  `18.0%`), formatting-equivalent figures *not* flagged (`18%` matches `18.0%`; a bare `18` matches
-  `18.0%` when the unit lives in a sibling field), structural numbers such as scene durations
-  ignored, overflow risks detected.
-- **Layouts** — each slide and infographic layout is drawn from the data it claims to show, and a
-  layout the content cannot support (a chart with one value, a donut of negatives, a stat with no
-  figure) falls back rather than drawing an empty region. Plotted values are validated against the
-  source like any other figure.
-- **Exports** — the `.pptx` is opened as a zip and its OOXML parts inspected (slide order, speaker
-  notes, figures preserved, overlong text trimmed, edits present); SVG is checked for
-  well-formedness and XML escaping; the video package is checked for every promised file and for its
-  estimate labels.
-- **SSRF screening** — loopback, RFC1918, carrier-grade NAT, multicast, IPv6 link-local and
-  IPv4-mapped bypasses (`::ffff:127.0.0.1`) are all blocked; the cloud metadata endpoint
-  (`169.254.169.254`) has its own test. Unparseable addresses fail closed.
-- **Fonts** — script detection, Indic font stacks in SVG, and `typeface="Nirmala UI"` present in
-  the PPTX run properties.
-- **Media sources** — image and video transcripts always carry a warning naming the model; video
-  frame duplicates are collapsed without removing genuinely repeated lines.
-- **Prompt boundary** — hostile source text (`IGNORE ALL PREVIOUS INSTRUCTIONS`) is verified to sit
-  inside the data fence, and the system message to instruct the model to treat it as data.
-- **Workspace state** — a failed format never removes a completed one, a failed retry keeps the
-  previous result, edits are stored separately from generated content, and a new source invalidates
-  the ledger and every artefact derived from it.
-- **Bundle export** — every format written, a nested `.pptx` that is valid OOXML, edits carried into
-  the archive, and an artefact whose content no longer validates is reported in the README rather
-  than silently dropped.
-
-### Live check
+Exports are checked further by inspecting the produced OOXML and SVG, and by probing rendered video
+for valid H.264/AAC streams.
 
 ```bash
-npm run dev        # in one terminal
-npm run smoke      # in another
+npm run dev                                        # in one terminal
+npm run smoke ./out samples/cyber-incident-report.pdf   # in another
 ```
 
-Runs the real pipeline against the sample and reports per-format latency, evidence validity, figure
-fidelity and any validation findings. This consumes API quota.
+The smoke test runs the real pipeline end to end and reports per-format timings, figure fidelity
+across formats, evidence validity and every validation finding.
 
-### What was observed
+### Still needs a person
 
-On one run of the sample report (a measurement, not a benchmark):
-
-- All 7 formats generated successfully from one 3-page source.
-- 49 evidence references produced; **0 failed to resolve** to a real passage.
-- The pilot-population caveat carried into **all 7** outputs.
-
-### Manual checks that still need a person
-
-- Open the exported `.pptx` in PowerPoint and confirm nothing is clipped.
-- Confirm the cited passages genuinely support the claims that cite them.
-- Confirm essential caveats survived into the outputs that needed them.
+Translation quality for non-English output, whether a generated recommendation is *appropriate*, and
+whether the source itself is trustworthy. The application does not claim any of these.
 
 ---
 
 ## Deployment
 
-The app is a standard Next.js server application. The **Node runtime is required** — PDF extraction
-and PPTX generation are not edge-compatible.
-
-Supply `GEMINI_API_KEY` as a server-side environment variable wherever you deploy. Never bake it
-into an image or commit it.
-
-### Docker
+A single Next.js container. Supply the keys as server-side environment variables — never bake them
+into an image.
 
 ```bash
 docker build -t sourcebridge .
-docker run -e GEMINI_API_KEY=your-key -p 3000:3000 sourcebridge
+docker run -e GROQ_API_KEY=... -e GEMINI_API_KEY=... -p 3000:3000 sourcebridge
 ```
 
-### Node host / Vercel
-
-```bash
-npm run build
-npm run start
-```
-
-`samples/` is read at runtime by `/api/sample`; `next.config.ts` declares it via
-`outputFileTracingIncludes` so it survives traced deployments.
-
-Generation latency is provider-bound. Concurrency is capped at two in-flight requests to respect
-free-tier rate limits.
+On a serverless host everything works except the rendered `.mp4`, which needs ffmpeg on the host. The
+application detects its absence and offers the video package instead.
 
 ---
 
-## Architecture
+## Honest scope
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). The five-slide technical presentation is at
-[`docs/SourceBridge-technical-presentation.pptx`](docs/SourceBridge-technical-presentation.pptx) —
-generated by SourceBridge's own PPTX exporter.
+Stated because the interface is not permitted to imply otherwise:
 
-```
-Browser workspace (React state; no database)
-        │
-        ▼
-POST /api/extract   validate → extract text → reflow → segment with stable IDs
-        │
-        ▼
-POST /api/analyze   shared fact ledger; invented evidence IDs stripped
-        │
-        ▼
-POST /api/generate  one request per format, bounded concurrency
-        │           schema validation + repair retry + structural checks
-        ▼
-Editable previews (generated content and edits stored separately)
-        │
-        ▼
-POST /api/export    deterministic renderers — no model call
-```
-
-### Key design decisions
-
-- **Source documents are data, never instructions.** Source text is fenced and the model is told
-  explicitly to ignore directives inside it. Covered by tests.
-- **Deterministic rendering.** The model produces structured content; application code renders
-  slides, SVG and packages. No model-generated markup is ever executed.
-- **One format per request.** Partial success is structural, not incidental.
-- **Generated content and edits are separate fields.** Regeneration warns before replacing edits.
-- **Exports never call the model.** An export cannot fail because of the provider, and always
-  renders the operator's current version.
+- **No fact verification.** Validation is structural: evidence IDs resolve, figures appear in the
+  source, qualifiers survive, content fits its layout. It does **not** check whether content is true.
+- **The provenance record is a hash chain, not a blockchain.** It establishes integrity and ordering
+  over the source, ledger and artefacts. It does not prove the source document was authentic, and
+  nothing is anchored to an external ledger.
+- **Meaning-drift detection is lexical, not semantic.** It compares qualifiers in a cited passage
+  against the output citing it. It does not understand the claim.
+- **No OCR.** Scanned PDFs are refused with a clear message. Images *are* supported, read by a vision
+  model — a transcription, not a literal extraction — and labelled as such.
+- **No generative imagery or video.** Frames are drawn by application code, deliberately: a
+  generative model cannot be trusted to render a figure, and in a video the viewer cannot check it.
+- **No persistence, accounts or approval workflow.** Work lives in the browser tab and is lost on
+  refresh. The app warns before you leave.
+- **Multilingual output is generated but not quality-checked.** Exporters declare fonts covering
+  Devanagari, Bengali, Tamil and Telugu; rendering still depends on the viewing machine having one.
+- **No confidence scores or usage metrics** — any number shown would be invented.
 
 ---
 
 ## Project layout
 
 ```
-app/
-  api/            extract · analyze · generate · export · sample · health
-  page.tsx        the workspace
-components/       Landing, Workspace, panels, seven previews, evidence drawer, UI primitives
-lib/
-  types.ts        data contracts
-  extract.ts      PDF/text extraction, reflow and segmentation
-  schemas.ts      Zod schemas: fact ledger + one per format
-  prompts.ts      prompt construction and the injection boundary
-  provider.ts     server-only provider access, model fallback, repair retry
-  providers/      one adapter per provider API shape
-  validate.ts     structural checks
-  export/         pptx · svg · markdown · videoPackage renderers
-  client/         browser API helpers and workspace state
-samples/          synthetic test documents
-scripts/          smoke test, deck builder, screenshot driver
-tests/            220 tests
+app/api/        extract · analyze · generate · export · sample · health
+lib/            provider · prompts · schemas · validate · meaningDrift · audit
+lib/export/     pptx · svg · video · bundle · deckTheme   (deterministic renderers)
+components/     Landing · Workspace · SourcePanel · ConfigPanel · OutputPanel
+samples/        synthetic source documents
+scripts/        smoke test, renderers, PDF builder
+tests/          247 tests
+docs/           ARCHITECTURE.md (2 pages) + PDF
 ```
 
----
+Sample documents in `samples/` are synthetic and were generated for this project. The incident, the
+organisations and every figure they describe are fictional.
 
 ## Third-party licences
 
-| Package | Purpose | Licence |
-| --- | --- | --- |
-| [Next.js](https://nextjs.org) | Framework | MIT |
-| [React](https://react.dev) | UI | MIT |
-| [Tailwind CSS](https://tailwindcss.com) | Styling | MIT |
-| [unpdf](https://github.com/unjs/unpdf) | PDF text extraction | MIT |
-| [PptxGenJS](https://gitbrent.github.io/PptxGenJS/) | PPTX generation | MIT |
-| [JSZip](https://stuk.github.io/jszip/) | Video package zip | MIT or GPLv3 |
-| [Zod](https://zod.dev) | Schema validation | MIT |
-| [@google/genai](https://github.com/googleapis/js-genai) | Gemini API client | Apache-2.0 |
-| [Vitest](https://vitest.dev) | Tests | MIT |
-| [playwright-core](https://playwright.dev) | Screenshot script (dev only) | Apache-2.0 |
-
-Sample documents in `samples/` are synthetic and were generated for this project. The
-incident, the organisations and every figure they describe are fictional.
-
----
-
-## Honest scope
-
-SourceBridge does not promise that AI generates everything perfectly. It promises a workflow where
-one source becomes a coordinated communication package, with **visible evidence** and **human
-control** at every step. Every generated artefact requires review before publication.
+Next.js, React (MIT) · Tailwind CSS (MIT) · Zod (MIT) · unpdf (MIT) · PptxGenJS (MIT) ·
+@resvg/resvg-js (MPL-2.0) · JSZip (MIT/GPLv3) · @mozilla/readability (Apache-2.0) ·
+@google/genai (Apache-2.0) · linkedom (ISC) · playwright-core (Apache-2.0, dev only).
