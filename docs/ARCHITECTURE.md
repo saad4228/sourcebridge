@@ -4,9 +4,9 @@
 
 | | |
 | --- | --- |
-| **Team** | _«team name»_ |
-| **Team ID** | _«team id»_ |
-| **Members** | _«member 1» · «member 2» · «member 3» · «member 4» · «member 5» · «member 6»_ |
+| **Team** | BYTE ME · Team ID 155404 |
+| **Team lead** | Mohammad Saad |
+| **Members** | Jatin Baghel · Ricky Mukherjee · Dhruv Vishwakarma · Hanzala Rafat · Yogita Verma |
 
 One source document becomes seven audience-specific communication artefacts sharing a single factual
 foundation, with every claim traceable to the passage it came from.
