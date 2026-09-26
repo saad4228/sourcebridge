@@ -40,6 +40,7 @@ export class ProviderError extends Error {
       | 'not_configured'
       | 'auth'
       | 'rate_limit'
+      | 'too_large'
       | 'timeout'
       | 'invalid_output'
       | 'unavailable'
@@ -290,6 +291,19 @@ function toProviderError(err: unknown): ProviderError {
     if (err.status === 401 || err.status === 403) {
       return new ProviderError(`${err.message} Check GROQ_API_KEY in .env.local.`, 'auth');
     }
+    // A request larger than the model's whole per-minute allowance arrives as
+    // a 429 and reads like a rate limit, but waiting cannot help: the request
+    // will never fit. Observed as "Limit 8000, Requested 8125" on the smaller
+    // model for a video package, where retrying it burned attempts on
+    // something that could not succeed at any time of day.
+    if (err.status === 413 || (err.status === 429 && /request too large|requested \d+/i.test(err.message))) {
+      return new ProviderError(
+        'This request is larger than that model allows in one call. A model with more room ' +
+          'is being tried.',
+        'too_large',
+        true,
+      );
+    }
     if (err.status === 429) {
       const error = new ProviderError(
         'That provider rate limit was reached. Another model is being tried.',
@@ -436,6 +450,7 @@ const TRANSIENT_CODES = new Set([
   'timeout',
   'network',
   'invalid_output',
+  'too_large',
 ]);
 
 /**
@@ -444,7 +459,7 @@ const TRANSIENT_CODES = new Set([
  * A dropped connection or one malformed reply is not grounds for standing a
  * model down: the next request to it may well succeed.
  */
-const NO_COOLDOWN_CODES = new Set(['network', 'invalid_output']);
+const NO_COOLDOWN_CODES = new Set(['network', 'invalid_output', 'too_large']);
 /**
  * Give every model in the chain a turn, plus a couple of retries for a model
  * that was merely unlucky. A fixed budget smaller than the chain would leave

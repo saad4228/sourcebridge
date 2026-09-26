@@ -188,3 +188,42 @@ describe('cooldowns', () => {
     expect(seen).toEqual(['fast-a', 'fast-b']);
   });
 });
+
+describe('a request larger than the model allows', () => {
+  const tooLarge = () =>
+    new ProviderError(
+      'This request is larger than that model allows in one call.',
+      'too_large',
+      true,
+    );
+
+  it('moves to another model instead of waiting', async () => {
+    const seen: string[] = [];
+    const result = await run(
+      withRetry(chain, async (ref) => {
+        seen.push(ref.model);
+        if (ref.model === 'fast-a') throw tooLarge();
+        return 'ok';
+      }),
+    );
+
+    // Waiting cannot help: the request will never fit in that model.
+    expect(seen).toEqual(['fast-a', 'fast-b']);
+    expect(result.model).toBe('fast-b');
+  });
+
+  it('leaves the model available for smaller work', async () => {
+    process.env.GEMINI_MODEL = 'roomy-primary';
+    process.env.GEMINI_FALLBACK_MODELS = 'roomy-second';
+
+    await run(
+      withRetry(modelChain(), async (ref) => {
+        if (ref.model === 'roomy-primary') throw tooLarge();
+        return 'ok';
+      }),
+    );
+
+    // One oversized format must not retire a model that handles the other six.
+    expect(modelChain().map((r) => r.model)).toContain('roomy-primary');
+  });
+});
