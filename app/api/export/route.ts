@@ -7,6 +7,7 @@ import { renderVideoPackageZip } from '@/lib/export/videoPackage';
 import { provenanceFooter, renderMarkdown } from '@/lib/export/markdown';
 import { renderBundle } from '@/lib/export/bundle';
 import { VideoRenderError, renderVideo } from '@/lib/export/video';
+import { ProviderError } from '@/lib/provider';
 import { briefWireSchema } from '@/lib/wire';
 import { FORMAT_IDS } from '@/lib/types';
 import type { GenerationBrief } from '@/lib/types';
@@ -207,6 +208,28 @@ export async function POST(request: Request) {
         { status: err.kind === 'no_ffmpeg' ? 501 : 500 },
       );
     }
+
+    // Rendering an MP4 speaks every scene, so it is the one export that calls
+    // a provider at all. A speech failure used to fall through to the generic
+    // message below, which told the operator nothing and hid the cause: on a
+    // fresh deployment the usual reason is simply that no Gemini key is set,
+    // since speech is the one thing the other provider cannot do.
+    if (err instanceof ProviderError) {
+      const needsKey = err.code === 'not_configured';
+      return NextResponse.json(
+        {
+          error: needsKey
+            ? 'Rendering an MP4 speaks the narration, which needs a Gemini key. Set ' +
+              'GEMINI_API_KEY on this host, or download the video package instead — it ' +
+              'contains the script, storyboard, narration and subtitles.'
+            : `The narration could not be generated: ${err.message}`,
+          kind: 'provider',
+          code: err.code,
+        },
+        { status: needsKey ? 501 : 502 },
+      );
+    }
+
     console.error(`[export:${body.format}:${body.kind}] failed`, err);
     return NextResponse.json(
       { error: 'The file could not be generated. The artefact itself is unaffected.' },

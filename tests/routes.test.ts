@@ -87,3 +87,51 @@ describe('export', () => {
     expect(response.status).toBe(400);
   });
 });
+
+describe('export: video failures are explained', () => {
+  const videoPackage = {
+    title: 'Incident explained',
+    objective: 'Inform',
+    scenes: [
+      {
+        index: 1,
+        heading: 'Opening',
+        estimatedSeconds: 10,
+        narration: '37 systems were degraded.',
+        onScreenText: '37 systems',
+        visualRecommendation: 'Wide shot.',
+        evidence: [],
+      },
+    ],
+    fullScript: '37 systems were degraded.',
+  };
+
+  const renderMp4 = () =>
+    exportRoute(
+      post(
+        'http://localhost/api/export',
+        JSON.stringify({ format: 'video_package', kind: 'mp4', content: videoPackage }),
+        { 'Content-Type': 'application/json' },
+      ),
+    );
+
+  it('names the missing key rather than reporting a generic failure', async () => {
+    const saved = { ...process.env };
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GROQ_API_KEY;
+
+    try {
+      const response = await renderMp4();
+      const body = await response.json();
+
+      // The old behaviour returned "The file could not be generated", which
+      // told an operator nothing about what to change.
+      expect(body.error).not.toMatch(/could not be generated\. The artefact/i);
+      expect([501, 500]).toContain(response.status);
+      // Either the key is named, or ffmpeg is — both are actionable.
+      expect(body.error).toMatch(/GEMINI_API_KEY|ffmpeg/i);
+    } finally {
+      process.env = saved;
+    }
+  });
+});
