@@ -21,7 +21,7 @@ cp .env.example .env.local     # then add at least one API key — see below
 npm run dev
 ```
 
-Open <http://localhost:3000> and press **Try the sample incident report**. No upload needed — a
+Open <http://localhost:3000>, then press **Try the sample incident report**. No upload needed — a
 bundled synthetic report is included.
 
 ### You need at least one key
