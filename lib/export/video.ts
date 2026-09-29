@@ -24,6 +24,27 @@ import type { VideoPackage } from '../schemas';
 import { synthesizeSpeech } from '../provider';
 import { FRAME_WIDTH, renderSceneCardSvg, renderTitleCardSvg } from './sceneCard';
 
+/**
+ * Raster width for the frames, independent of the layout.
+ *
+ * The scene cards are authored in a 1920x1080 coordinate space and rasterised
+ * to whatever width is asked for, so lowering this changes the output
+ * resolution and nothing about the design.
+ *
+ * It exists because memory, not time, is what limits a render on a small host.
+ * Measured against a 512 MB container: one, two and three scenes rendered at
+ * 1920 in 78 to 149 seconds, and four scenes died after 54 -- failing sooner
+ * than the longer runs that succeeded, which is a crash rather than a timeout.
+ * At 1280 each frame costs 55% fewer pixels.
+ *
+ * Left at 1920 by default, since a machine with room should produce full HD.
+ * Set VIDEO_RENDER_WIDTH=1280 where memory is tight.
+ */
+function renderWidth(): number {
+  const configured = Number(process.env.VIDEO_RENDER_WIDTH);
+  return Number.isFinite(configured) && configured >= 640 ? Math.round(configured) : FRAME_WIDTH;
+}
+
 /** Scenes beyond this make the render slow and the quota cost high. */
 const MAX_SCENES = 8;
 /** How long the title card holds before the first narrated scene. */
@@ -173,7 +194,7 @@ export async function renderVideo(
     // --- Draw every frame --------------------------------------------------
     options.onProgress?.('Drawing frames');
     const rasterise = (svg: string) =>
-      new Resvg(svg, { fitTo: { mode: 'width', value: FRAME_WIDTH } }).render().asPng();
+      new Resvg(svg, { fitTo: { mode: 'width', value: renderWidth() } }).render().asPng();
 
     await writeFile(path.join(dir, 'frame00.png'), rasterise(renderTitleCardSvg(content, footer)));
     for (const [i, scene] of scenes.entries()) {
