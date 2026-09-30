@@ -73,7 +73,7 @@ If ffmpeg lives somewhere unusual, set `FFMPEG_PATH` to the binary.
 | --- | --- |
 | `npm run dev` | Development server on :3000 |
 | `npm run build` / `npm start` | Production build and serve |
-| `npm test` | **247 tests**, no API key required |
+| `npm test` | **248 tests**, no API key required |
 | `npm run test:watch` | Tests in watch mode |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
@@ -180,7 +180,7 @@ both is why one exhausted provider does not stop the application.
 ## Testing
 
 ```bash
-npm test          # 247 tests, no API key required
+npm test          # 248 tests, no API key required
 ```
 
 Covering extraction, schema validation, evidence resolution, meaning drift, the provenance chain,
@@ -267,7 +267,7 @@ lib/export/     pptx · svg · video · bundle · deckTheme   (deterministic ren
 components/     Landing · Workspace · SourcePanel · ConfigPanel · OutputPanel
 samples/        synthetic source documents
 scripts/        smoke test, renderers, PDF builder
-tests/          247 tests
+tests/          248 tests
 docs/           ARCHITECTURE.md (2 pages) + PDF
 ```
 
