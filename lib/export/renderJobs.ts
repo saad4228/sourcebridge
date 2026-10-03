@@ -119,11 +119,6 @@ export function readJob(id: string): RenderJob | null {
   return job;
 }
 
-/** Forget a record, used when a render is abandoned before it reports. */
-export function clearJob(id: string): void {
-  jobs.delete(id);
-}
-
 /** Visible to tests so each can start from an empty registry. */
 export function resetJobs(): void {
   jobs.clear();

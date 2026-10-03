@@ -117,7 +117,7 @@ request larger than a model's allowance rotates immediately rather than retrying
 
 ## 8. Verification and deployment
 
-**291 automated tests** run without an API key, covering extraction, schema validation, evidence
+**290 automated tests** run without an API key, covering extraction, schema validation, evidence
 resolution, meaning drift, the provenance chain, prompt-injection boundaries, SSRF screening and
 every renderer. Exports are checked further by inspecting the produced OOXML and SVG, and by probing
 rendered video for valid H.264/AAC streams. Deploys as a single Next.js container; ffmpeg on the host

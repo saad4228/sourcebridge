@@ -1,7 +1,6 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import {
   beginJob,
-  clearJob,
   isRenderId,
   readJob,
   recordProgress,
@@ -118,12 +117,6 @@ describe('measured subtitles', () => {
     beginJob(ID, 8);
     updateJob(ID, { stage: 'complete', dropped: 4 });
     expect(readJob(ID)?.dropped).toBe(4);
-  });
-
-  it('forgets a job on request', () => {
-    beginJob(ID, 1);
-    clearJob(ID);
-    expect(readJob(ID)).toBeNull();
   });
 });
 
