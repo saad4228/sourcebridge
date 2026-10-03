@@ -6,7 +6,8 @@ import { renderInfographicSvg } from '@/lib/export/svg';
 import { renderVideoPackageZip } from '@/lib/export/videoPackage';
 import { provenanceFooter, renderMarkdown } from '@/lib/export/markdown';
 import { renderBundle } from '@/lib/export/bundle';
-import { VideoRenderError, renderVideo } from '@/lib/export/video';
+import { MAX_SCENES, VideoRenderError, renderVideo } from '@/lib/export/video';
+import { beginJob, isRenderId, recordProgress, updateJob } from '@/lib/export/renderJobs';
 import { ProviderError } from '@/lib/provider';
 import { briefWireSchema } from '@/lib/wire';
 import { FORMAT_IDS } from '@/lib/types';
@@ -26,6 +27,13 @@ const requestSchema = z.object({
   content: z.unknown(),
   sourceTitle: z.string().nullable().optional(),
   brief: briefWireSchema.optional(),
+  /**
+   * Correlation handle for a long render, supplied by the browser.
+   *
+   * Only the MP4 export uses it: that render takes minutes, so it reports its
+   * stage against this id and the client polls /api/export/status for it.
+   */
+  renderId: z.string().optional(),
 });
 
 /** Every completed artefact in one archive. */
@@ -174,12 +182,50 @@ export async function POST(request: Request) {
         if (body.format !== 'video_package') {
           return NextResponse.json({ error: 'MP4 export applies only to video packages.' }, { status: 400 });
         }
-        const rendered = await renderVideo(content as VideoPackage, { sourceTitle });
-        const response = fileResponse(rendered.mp4, `${base}-video.mp4`, 'video/mp4');
-        // Measured from the rendered audio, so it is safe to state.
-        response.headers.set('X-Video-Seconds', rendered.totalSeconds.toFixed(1));
-        response.headers.set('X-Video-Voice', rendered.voice);
-        return response;
+        const renderId = isRenderId(body.renderId) ? body.renderId : null;
+        const scenes = (content as VideoPackage).scenes?.length ?? 0;
+        if (renderId) beginJob(renderId, Math.min(scenes, MAX_SCENES));
+
+        try {
+          const rendered = await renderVideo(content as VideoPackage, {
+            sourceTitle,
+            // Turns a silent multi-minute wait into a stated stage. Without
+            // this the renderer reported its progress to nobody.
+            onProgress: renderId ? (message) => recordProgress(renderId, message) : undefined,
+          });
+
+          // The subtitles are the reason the narration is spoken server-side:
+          // their timings come from the real audio. They used to be computed
+          // and dropped on the floor, so they are kept with the job record for
+          // the client to collect alongside the video.
+          if (renderId) {
+            updateJob(renderId, {
+              stage: 'complete',
+              message: 'Render complete',
+              srt: rendered.srt,
+              dropped: rendered.droppedScenes,
+            });
+          }
+
+          const response = fileResponse(rendered.mp4, `${base}-video.mp4`, 'video/mp4');
+          // Measured from the rendered audio, so it is safe to state.
+          response.headers.set('X-Video-Seconds', rendered.totalSeconds.toFixed(1));
+          response.headers.set('X-Video-Voice', rendered.voice);
+          response.headers.set('X-Video-Tts-Model', rendered.ttsModel);
+          if (rendered.droppedScenes > 0) {
+            response.headers.set('X-Video-Scenes-Dropped', String(rendered.droppedScenes));
+          }
+          return response;
+        } catch (err) {
+          if (renderId) {
+            updateJob(renderId, {
+              stage: 'failed',
+              message: 'Render failed',
+              error: err instanceof Error ? err.message : 'The render failed.',
+            });
+          }
+          throw err;
+        }
       }
 
       case 'zip': {

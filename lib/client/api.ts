@@ -203,12 +203,100 @@ export async function runBounded<T>(
 
 export type ExportKind = 'markdown' | 'text' | 'pptx' | 'svg' | 'zip' | 'mp4';
 
+/** Hand a blob to the browser as a download. */
+function saveBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  // Revoke on the next tick so the download has started.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export interface ExportInput {
   kind: ExportKind;
   format: FormatId;
   content: unknown;
   sourceTitle: string | null;
   brief?: GenerationBrief;
+  /** Correlation handle so a long MP4 render can report its progress. */
+  renderId?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Render progress
+// ---------------------------------------------------------------------------
+
+export type RenderStage =
+  | 'unknown'
+  | 'queued'
+  | 'speaking'
+  | 'drawing'
+  | 'encoding'
+  | 'complete'
+  | 'failed';
+
+export interface RenderProgress {
+  stage: RenderStage;
+  message?: string;
+  scene?: number;
+  sceneCount?: number;
+  /** Scenes the package carried that the video does not. */
+  dropped?: number;
+  srtAvailable?: boolean;
+  error?: string;
+  elapsedMs?: number;
+}
+
+/** A fresh id for one render. */
+export function newRenderId(): string {
+  // randomUUID needs a secure context; a plain random id is an adequate
+  // correlation handle where it is unavailable, and it grants nothing.
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  const hex = (n: number) =>
+    Array.from({ length: n }, () => Math.floor(Math.random() * 16).toString(16)).join('');
+  return `${hex(8)}-${hex(4)}-${hex(4)}-${hex(4)}-${hex(12)}`;
+}
+
+/** Read the current stage of a render. Never throws; polling must not break the UI. */
+export async function checkRenderProgress(id: string): Promise<RenderProgress> {
+  try {
+    const response = await fetch(`/api/export/status?id=${encodeURIComponent(id)}`, {
+      cache: 'no-store',
+    });
+    if (!response.ok) return { stage: 'unknown' };
+    return (await response.json()) as RenderProgress;
+  } catch {
+    return { stage: 'unknown' };
+  }
+}
+
+/**
+ * Download the subtitles measured against the rendered audio.
+ *
+ * Offered separately from the video because a browser will not reliably accept
+ * two programmatic downloads from one click, and because the subtitles are
+ * genuinely optional to the person exporting.
+ */
+export async function downloadRenderSubtitles(
+  id: string,
+  base: string,
+): Promise<ApiResult<string>> {
+  try {
+    const response = await fetch(`/api/export/status?id=${encodeURIComponent(id)}&file=srt`, {
+      cache: 'no-store',
+    });
+    if (!response.ok) return { ok: false, ...(await readError(response)) };
+
+    const filename = `${base}-subtitles.srt`;
+    saveBlob(await response.blob(), filename);
+    return { ok: true, data: filename };
+  } catch {
+    return { ok: false, error: 'The subtitles could not be downloaded.' };
+  }
 }
 
 export interface BundleInput {
@@ -242,22 +330,25 @@ export async function downloadExport(
       match?.[1] ?? (input.kind === 'bundle' ? 'sourcebridge-export.zip' : `sourcebridge-${input.format}`);
 
     const skipped = response.headers.get('X-Export-Skipped');
+    // A video is capped at eight scenes, so a longer package loses its tail.
+    // Saying so beats handing over an MP4 that quietly stops early.
+    const dropped = Number(response.headers.get('X-Video-Scenes-Dropped') ?? 0);
 
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    // Revoke on the next tick so the download has started.
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    saveBlob(blob, filename);
 
-    return {
-      ok: true,
-      data: skipped ? `${filename} (skipped: ${skipped})` : filename,
-    };
+    const note = skipped
+      ? ` (skipped: ${skipped})`
+      : dropped > 0
+        ? ` — the last ${dropped} scene${dropped > 1 ? 's were' : ' was'} not included`
+        : '';
+
+    return { ok: true, data: `${filename}${note}` };
   } catch {
-    return { ok: false, error: 'The download could not be started.' };
+    return {
+      ok: false,
+      error:
+        'The download did not complete. A video render can take several minutes — if it was ' +
+        'interrupted, the narration already spoken is reused, so retrying costs less.',
+    };
   }
 }

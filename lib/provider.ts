@@ -206,19 +206,19 @@ const cooldowns = new Map<string, number>();
 /** How long to skip a model after it reports overload or exhausted quota. */
 const COOLDOWN_MS = { unavailable: 60_000, rate_limit: 5 * 60_000, bad_model: 60 * 60_000 } as const;
 
+/** How long a model that reported `code` should be stood down for. */
+function cooldownMs(code: string, statedMs?: number): number {
+  // A provider that names its own wait knows better than any default. Groq's
+  // limits clear in seconds, and standing its models down for the default
+  // five minutes gave the rest of a run to the slow provider for no reason.
+  if (statedMs !== undefined) return Math.min(statedMs + 500, COOLDOWN_MS.rate_limit);
+  if (code === 'rate_limit') return COOLDOWN_MS.rate_limit;
+  if (code === 'bad_model') return COOLDOWN_MS.bad_model;
+  return COOLDOWN_MS.unavailable;
+}
+
 function markUnavailable(ref: ModelRef, code: string, statedMs?: number) {
-  const ms =
-    // A provider that names its own wait knows better than any default. Groq's
-    // limits clear in seconds, and standing its models down for the default
-    // five minutes gave the rest of a run to the slow provider for no reason.
-    statedMs !== undefined
-      ? Math.min(statedMs + 500, COOLDOWN_MS.rate_limit)
-      : code === 'rate_limit'
-        ? COOLDOWN_MS.rate_limit
-        : code === 'bad_model'
-          ? COOLDOWN_MS.bad_model
-          : COOLDOWN_MS.unavailable;
-  cooldowns.set(refKey(ref), Date.now() + ms);
+  cooldowns.set(refKey(ref), Date.now() + cooldownMs(code, statedMs));
 }
 
 function markAvailable(ref: ModelRef) {
@@ -717,16 +717,52 @@ const MEDIA_PROMPTS: Record<MediaKind, string> = {
  *
  * Separate from the text chain: TTS is a different model family with its own
  * per-model daily allowance, so exhausting one does not affect generation.
+ *
+ * Every speech model a free key can reach belongs here, because rendering an
+ * MP4 speaks each scene in turn: a four-scene video costs four calls, and a
+ * handful of renders exhausts a single model for the day. Two entries were
+ * running out while two further models sat unused with their own untouched
+ * allowances -- the chain was the limit, not the quota. Listing all four
+ * roughly doubles how many videos a day a free key can produce.
+ *
+ * The Pro speech model is deliberately absent. It answers with a billing error
+ * on a free key, so including it would add a guaranteed failed attempt to
+ * every rotation.
  */
-const DEFAULT_TTS_MODELS = ['gemini-2.5-flash-preview-tts', 'gemini-3.8-flash-tts'];
+const DEFAULT_TTS_MODELS = [
+  'gemini-2.5-flash-preview-tts',
+  'gemini-3.8-flash-tts',
+  'gemini-3.8-flash-lite-tts',
+  'gemini-3.1-flash-tts-preview',
+];
 
+/**
+ * The speech chain to try, skipping models still in cooldown.
+ *
+ * Rendering a video speaks each scene in a separate call, so without this every
+ * scene started again at a model the previous scene had just found exhausted:
+ * a six-scene render spent its first attempt on a dead model six times over,
+ * each one waiting out a refusal before rotating. The cooldown map is shared
+ * with the text chain, and the `tts:` prefix keeps the two sets of entries
+ * distinct.
+ *
+ * As with the text chain, an empty live set returns the whole chain: a stale
+ * cooldown must never leave a render with nothing to call.
+ */
 function ttsChain(): string[] {
   const configured = process.env.GEMINI_TTS_MODELS?.trim();
   const models = configured
     ? configured.split(',').map((m) => m.trim()).filter(Boolean)
     : DEFAULT_TTS_MODELS;
-  return [...new Set(models)];
+  const all = [...new Set(models)];
+
+  const now = Date.now();
+  const live = all.filter((model) => (cooldowns.get(ttsKey(model)) ?? 0) <= now);
+  return live.length > 0 ? live : all;
 }
+
+/** Cooldown key for a speech model, kept apart from the same name on the text chain. */
+const ttsKey = (model: string) => `tts:${model}`;
 
 export interface SpeechResult {
   /** Raw signed 16-bit little-endian PCM, mono. */
@@ -778,6 +814,7 @@ export async function synthesizeSpeech(text: string, voice = 'Kore'): Promise<Sp
       // The mime type carries the rate, e.g. "audio/L16;codec=pcm;rate=24000".
       const sampleRate = Number(inline.mimeType?.match(/rate=(\d+)/)?.[1] ?? 24000);
 
+      cooldowns.delete(ttsKey(model));
       return {
         pcm,
         sampleRate,
@@ -788,6 +825,12 @@ export async function synthesizeSpeech(text: string, voice = 'Kore'): Promise<Sp
     } catch (err) {
       const error = toProviderError(err);
       const worthRetrying = TRANSIENT_CODES.has(error.code) || error.code === 'bad_model';
+      // Remember that this speech model is refusing work, so the next scene in
+      // the same render starts at one that might answer instead of spending an
+      // attempt rediscovering this.
+      if (worthRetrying && !NO_COOLDOWN_CODES.has(error.code)) {
+        cooldowns.set(ttsKey(model), Date.now() + cooldownMs(error.code, error.retryAfterMs));
+      }
       if (!worthRetrying || attempt === Math.max(chain.length * 2, 2) - 1) throw error;
       lastError = error;
       if ((attempt + 1) % chain.length === 0) await sleep(2000);

@@ -27,6 +27,22 @@ ENV HOSTNAME=0.0.0.0
 # detects that and offers the video package instead, but the feature is gone.
 RUN apk add --no-cache ffmpeg
 
+# Render video frames at 1280 rather than 1920 by default.
+#
+# Memory, not time, is what limits a render in a container. Measured against a
+# 512 MB instance: one, two and three scenes rasterised at 1920 succeeded in 78
+# to 149 seconds, and four scenes died after 54 -- failing sooner than the
+# longer runs that worked, which is a crash and not a timeout. A typical
+# package is five to seven scenes, so the full-HD default was the one setting
+# guaranteed to fail on a small host.
+#
+# The scene cards are authored in a 1920x1080 space and rasterised to whatever
+# width is asked for, so this changes resolution and nothing about the design.
+# Override it where the instance has room:
+#
+#   docker run -e VIDEO_RENDER_WIDTH=1920 ...
+ENV VIDEO_RENDER_WIDTH=1280
+
 RUN addgroup -S app && adduser -S app -G app
 
 COPY --from=builder /app/package.json ./package.json

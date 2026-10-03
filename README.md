@@ -63,6 +63,11 @@ sudo apt install ffmpeg           # Debian/Ubuntu
 
 If ffmpeg lives somewhere unusual, set `FFMPEG_PATH` to the binary.
 
+A render speaks every scene, so it takes a few minutes and the interface reports which scene it is
+on. Narration already spoken is reused, so retrying a render that failed part-way costs no further
+speech quota. Afterwards the subtitles are offered as a separate `.srt` — unlike the ones in the
+video package, their timings are measured against the audio that was actually produced.
+
 **Requires Node.js 20+.** Developed on Node 24.18.0 / npm 11.16.0.
 
 ---
@@ -73,7 +78,7 @@ If ffmpeg lives somewhere unusual, set `FFMPEG_PATH` to the binary.
 | --- | --- |
 | `npm run dev` | Development server on :3000 |
 | `npm run build` / `npm start` | Production build and serve |
-| `npm test` | **248 tests**, no API key required |
+| `npm test` | **291 tests**, no API key required |
 | `npm run test:watch` | Tests in watch mode |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
@@ -180,7 +185,7 @@ both is why one exhausted provider does not stop the application.
 ## Testing
 
 ```bash
-npm test          # 248 tests, no API key required
+npm test          # 291 tests, no API key required
 ```
 
 Covering extraction, schema validation, evidence resolution, meaning drift, the provenance chain,
@@ -218,6 +223,12 @@ docker run -e GROQ_API_KEY=... -e GEMINI_API_KEY=... -p 3000:3000 sourcebridge
 **Keys are supplied at run time and never baked into the image.** `.dockerignore` excludes `.env*`
 so a local key file cannot be copied into a layer. On a host, set them as environment variables in
 the dashboard — not in a committed file.
+
+The image renders video frames at 1280 rather than full HD, because memory is what limits a render
+in a container: measured on a 512 MB instance, three scenes at 1920 succeeded and four crashed,
+while a typical package is five to seven. Set `VIDEO_RENDER_WIDTH=1920` where the instance has room
+— the frames are drawn in a 1920×1080 space either way, so this changes resolution and nothing
+about the design.
 
 ### Choosing a host
 
@@ -267,7 +278,7 @@ lib/export/     pptx · svg · video · bundle · deckTheme   (deterministic ren
 components/     Landing · Workspace · SourcePanel · ConfigPanel · OutputPanel
 samples/        synthetic source documents
 scripts/        smoke test, renderers, PDF builder
-tests/          248 tests
+tests/          291 tests
 docs/           ARCHITECTURE.md (2 pages) + PDF
 ```
 

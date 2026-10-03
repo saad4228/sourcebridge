@@ -15,13 +15,14 @@
  */
 
 import 'server-only';
+import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Resvg } from '@resvg/resvg-js';
 import type { VideoPackage } from '../schemas';
-import { synthesizeSpeech } from '../provider';
+import { synthesizeSpeech, type SpeechResult } from '../provider';
 import { FRAME_WIDTH, renderSceneCardSvg, renderTitleCardSvg } from './sceneCard';
 
 /**
@@ -46,9 +47,69 @@ function renderWidth(): number {
 }
 
 /** Scenes beyond this make the render slow and the quota cost high. */
-const MAX_SCENES = 8;
+export const MAX_SCENES = 8;
 /** How long the title card holds before the first narrated scene. */
 const TITLE_SECONDS = 2.5;
+
+/**
+ * Narration already spoken, so a failed render does not pay for it twice.
+ *
+ * Speech is metered per model per day and every scene costs one call, so a
+ * six-scene package spends six of a small daily allowance. Before this, a
+ * render that failed on the last scene threw away the five calls that had
+ * already succeeded, and the retry bought them again -- which is how two
+ * attempts at one video could exhaust a day's capacity.
+ *
+ * Keyed by the voice and the exact narration, so an edited scene is correctly
+ * re-spoken while the untouched ones are reused. Entries are dropped oldest
+ * first past the byte cap; losing one only costs a call that would have been
+ * made anyway.
+ */
+const SPEECH_CACHE_MAX_BYTES = 48 * 1024 * 1024;
+const speechCache = new Map<string, SpeechResult>();
+let speechCacheBytes = 0;
+
+function speechKey(text: string, voice: string): string {
+  return createHash('sha256').update(`${voice}\u0000${text.trim()}`).digest('hex');
+}
+
+function cacheSpeech(key: string, speech: SpeechResult): void {
+  // Never cache something that cannot be evicted back under the cap.
+  if (speech.pcm.byteLength > SPEECH_CACHE_MAX_BYTES) return;
+
+  speechCache.set(key, speech);
+  speechCacheBytes += speech.pcm.byteLength;
+
+  for (const [oldest, entry] of speechCache) {
+    if (speechCacheBytes <= SPEECH_CACHE_MAX_BYTES) break;
+    if (oldest === key) continue;
+    speechCache.delete(oldest);
+    speechCacheBytes -= entry.pcm.byteLength;
+  }
+}
+
+/**
+ * Speak a scene, reusing the audio if this exact narration was spoken before.
+ *
+ * Exported for tests: whether a retry re-pays for narration already spoken is
+ * what decides how many videos a day a free key can render, which is worth
+ * asserting without standing up ffmpeg and a real encode.
+ */
+export async function speakScene(text: string, voice: string): Promise<SpeechResult> {
+  const key = speechKey(text, voice);
+  const cached = speechCache.get(key);
+  if (cached) return cached;
+
+  const speech = await synthesizeSpeech(text, voice);
+  cacheSpeech(key, speech);
+  return speech;
+}
+
+/** Visible to tests, which must not inherit audio cached by another case. */
+export function resetSpeechCache(): void {
+  speechCache.clear();
+  speechCacheBytes = 0;
+}
 
 export class VideoRenderError extends Error {
   constructor(message: string, readonly kind: 'no_ffmpeg' | 'render_failed' | 'invalid_input') {
@@ -137,6 +198,15 @@ export interface RenderedVideo {
   scenes: { index: number; seconds: number }[];
   voice: string;
   ttsModel: string;
+  /**
+   * Scenes the package carried that the video does not.
+   *
+   * The renderer caps a video at MAX_SCENES, but a Detailed package can hold
+   * up to twelve scenes. Dropping four of them silently gave an MP4 that just
+   * stopped early with nothing to explain why, so the count is reported and
+   * the interface says so.
+   */
+  droppedScenes: number;
 }
 
 export interface RenderVideoOptions {
@@ -153,7 +223,9 @@ export async function renderVideo(
   content: VideoPackage,
   options: RenderVideoOptions = {},
 ): Promise<RenderedVideo> {
-  const scenes = (content.scenes ?? []).slice(0, MAX_SCENES);
+  const all = content.scenes ?? [];
+  const scenes = all.slice(0, MAX_SCENES);
+  const droppedScenes = all.length - scenes.length;
   if (scenes.length === 0) {
     throw new VideoRenderError('This video package has no scenes to render.', 'invalid_input');
   }
@@ -180,7 +252,7 @@ export async function renderVideo(
 
     for (const [i, scene] of scenes.entries()) {
       options.onProgress?.(`Speaking scene ${i + 1} of ${scenes.length}`);
-      const speech = await synthesizeSpeech(scene.narration, voice);
+      const speech = await speakScene(scene.narration, voice);
       audio.push(speech.pcm);
       durations.push({ index: scene.index, seconds: speech.seconds });
       sampleRate = speech.sampleRate;
@@ -266,6 +338,7 @@ export async function renderVideo(
       scenes: durations,
       voice,
       ttsModel,
+      droppedScenes,
     };
   } finally {
     await rm(dir, { recursive: true, force: true });

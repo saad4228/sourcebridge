@@ -17,7 +17,7 @@ import { renderMarkdown } from '@/lib/export/markdown';
 import { activeContent } from '@/lib/types';
 import { FORMAT_LABELS } from '@/lib/types';
 import type { Artifact, FormatId, GenerationBrief, ValidationFinding } from '@/lib/types';
-import type { ExportKind } from '@/lib/client/api';
+import type { ExportKind, RenderProgress } from '@/lib/client/api';
 
 /** Downloads offered per format. Text/Markdown is always available. */
 const EXPORTS: Record<FormatId, { kind: ExportKind; label: string; primary?: boolean }[]> = {
@@ -39,6 +39,30 @@ const EXPORTS: Record<FormatId, { kind: ExportKind; label: string; primary?: boo
     { kind: 'markdown', label: 'Markdown' },
   ],
 };
+
+/**
+ * What the render is doing, in words the operator can act on.
+ *
+ * Prefers the server's own message, which names the scene being spoken; the
+ * per-stage text is the fallback for a poll that landed between updates.
+ */
+function renderStageLabel(progress: RenderProgress): string {
+  if (progress.message) return progress.message;
+  switch (progress.stage) {
+    case 'speaking':
+      return 'Speaking the narration';
+    case 'drawing':
+      return 'Drawing frames';
+    case 'encoding':
+      return 'Encoding video';
+    case 'complete':
+      return 'Render complete';
+    case 'failed':
+      return progress.error ?? 'The render failed';
+    default:
+      return 'Starting the render';
+  }
+}
 
 function StatusDot({ status }: { status: Artifact['status'] }) {
   const style =
@@ -79,6 +103,9 @@ export function OutputPanel({
   onExport,
   onExportAll,
   exporting,
+  renderProgress,
+  hasRenderSubtitles,
+  onDownloadSubtitles,
 }: {
   formats: FormatId[];
   artifacts: Partial<Record<FormatId, Artifact>>;
@@ -90,6 +117,11 @@ export function OutputPanel({
   onExport: (format: FormatId, kind: ExportKind, content: unknown) => void;
   onExportAll: () => void;
   exporting: string | null;
+  /** Stage of a video render in flight, when one is running. */
+  renderProgress?: RenderProgress | null;
+  /** True once a render has produced subtitles measured against its audio. */
+  hasRenderSubtitles?: boolean;
+  onDownloadSubtitles?: () => void;
 }) {
   const [active, setActive] = useState<FormatId | null>(null);
   const [editing, setEditing] = useState<Record<string, boolean>>({});
@@ -266,6 +298,48 @@ export function OutputPanel({
         ) : null}
       </div>
 
+      {/* --- Render progress ---------------------------------------------- */}
+      {/*
+        A video render speaks every scene, draws every frame and then encodes,
+        which takes minutes. Without this the operator watched a spinner with
+        no indication of progress, assumed it had hung, and clicked again --
+        which spends the speech allowance twice over.
+      */}
+      {renderProgress && (
+        <div className="shrink-0 border-t border-[var(--color-rule)] bg-[var(--color-surface-sunken)] px-4 py-2.5">
+          <div className="flex items-center gap-2 text-xs text-[var(--color-ink-muted)]">
+            <Spinner />
+            <span>{renderStageLabel(renderProgress)}</span>
+            {renderProgress.elapsedMs !== undefined && renderProgress.elapsedMs > 5000 && (
+              <span className="text-[var(--color-ink-faint)]">
+                · {Math.round(renderProgress.elapsedMs / 1000)}s
+              </span>
+            )}
+          </div>
+          {renderProgress.sceneCount !== undefined && renderProgress.scene !== undefined && (
+            <div
+              className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-[var(--color-rule)]"
+              role="progressbar"
+              aria-valuenow={renderProgress.scene}
+              aria-valuemin={0}
+              aria-valuemax={renderProgress.sceneCount}
+              aria-label="Scenes spoken"
+            >
+              <div
+                className="h-full rounded-full bg-[var(--color-accent)] transition-[width]"
+                style={{
+                  width: `${Math.round((renderProgress.scene / renderProgress.sceneCount) * 100)}%`,
+                }}
+              />
+            </div>
+          )}
+          <p className="mt-1.5 text-[11px] leading-snug text-[var(--color-ink-faint)]">
+            Each scene is spoken by a text-to-speech model, so this takes a few minutes. Narration
+            already spoken is reused if the render has to be retried. Leave this tab open.
+          </p>
+        </div>
+      )}
+
       {/* --- Downloads ---------------------------------------------------- */}
       {artifact?.status === 'complete' && content !== null && (
         <footer className="flex shrink-0 flex-wrap items-center gap-2 border-t border-[var(--color-rule)] px-4 py-2.5">
@@ -285,6 +359,18 @@ export function OutputPanel({
               </Button>
             );
           })}
+          {artifact.format === 'video_package' && hasRenderSubtitles && (
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={exporting === 'subtitles'}
+              onClick={onDownloadSubtitles}
+              title="Subtitle timings measured against the audio that was rendered"
+            >
+              {exporting === 'subtitles' ? <Spinner /> : null}
+              Subtitles (.srt)
+            </Button>
+          )}
           <Button
             size="sm"
             variant="secondary"

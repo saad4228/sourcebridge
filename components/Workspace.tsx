@@ -21,15 +21,19 @@ import { Badge, Button, Callout, Panel, Spinner, cx } from './ui';
 import {
   analyzeSource,
   checkHealth,
+  checkRenderProgress,
   downloadExport,
+  downloadRenderSubtitles,
   extractPdf,
   extractText,
   extractUrl,
   generateArtifact,
   loadSample,
+  newRenderId,
   runBounded,
   type ExportKind,
   type HealthStatus,
+  type RenderProgress,
 } from '@/lib/client/api';
 import { initialState, progressOf, reducer } from '@/lib/client/state';
 import { FORMAT_LABELS } from '@/lib/types';
@@ -38,6 +42,15 @@ import type { FormatId, Source } from '@/lib/types';
 /** Concurrent generation requests. Kept low to respect provider rate limits. */
 const GENERATION_CONCURRENCY = 2;
 
+/**
+ * How often to ask what a video render is doing.
+ *
+ * A render reports per scene, and a scene takes several seconds to speak, so
+ * polling faster than this only adds requests without telling the operator
+ * anything new.
+ */
+const RENDER_POLL_MS = 2000;
+
 export function Workspace() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [health, setHealth] = useState<HealthStatus | null>(null);
@@ -45,6 +58,9 @@ export function Workspace() {
   const [highlightId, setHighlightId] = useState<string | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [renderProgress, setRenderProgress] = useState<RenderProgress | null>(null);
+  /** The last completed render, so its measured subtitles stay downloadable. */
+  const [renderSubtitles, setRenderSubtitles] = useState<string | null>(null);
 
   // Keep the latest state reachable inside async generation loops, which read
   // it after awaits rather than closing over the render-time value.
@@ -185,18 +201,56 @@ export function Workspace() {
     async (format: FormatId, kind: ExportKind, content: unknown) => {
       const key = `${format}:${kind}`;
       setExporting(key);
+
+      // A video render speaks every scene and then encodes, which takes
+      // minutes. It is the one export worth reporting progress for; the rest
+      // return in under a second.
+      const renderId = kind === 'mp4' ? newRenderId() : undefined;
+      let poll: ReturnType<typeof setInterval> | undefined;
+
+      if (renderId) {
+        setRenderSubtitles(null);
+        setRenderProgress({ stage: 'queued', message: 'Starting the render' });
+        poll = setInterval(() => {
+          void checkRenderProgress(renderId).then((progress) => {
+            // An unknown id means the poll arrived before the render
+            // registered, or after its record expired. Neither is a failure,
+            // so the last real stage stays on screen.
+            if (progress.stage !== 'unknown') setRenderProgress(progress);
+          });
+        }, RENDER_POLL_MS);
+      }
+
       const result = await downloadExport({
         format,
         kind,
         content,
         sourceTitle: stateRef.current.source?.title ?? null,
         brief: stateRef.current.brief,
+        renderId,
       });
+
+      if (poll) clearInterval(poll);
       setExporting(null);
+      setRenderProgress(null);
+      // Keep the id only on success: the subtitles exist only if the render
+      // produced audio to measure them against.
+      if (renderId && result.ok) setRenderSubtitles(renderId);
       setToast(result.ok ? `Downloaded ${result.data}` : result.error);
     },
     [],
   );
+
+  /** Subtitles timed against the audio the render actually produced. */
+  const handleDownloadSubtitles = useCallback(async () => {
+    const id = renderSubtitles;
+    if (!id) return;
+    setExporting('subtitles');
+    const base = stateRef.current.source?.title?.replace(/\.[^.]+$/, '') ?? 'sourcebridge';
+    const result = await downloadRenderSubtitles(id, base);
+    setExporting(null);
+    setToast(result.ok ? `Downloaded ${result.data}` : result.error);
+  }, [renderSubtitles]);
 
   /** Every completed artefact in one archive, rendered from the current edits. */
   const handleExportAll = useCallback(async () => {
@@ -433,6 +487,9 @@ export function Workspace() {
             onExport={(format, kind, content) => void handleExport(format, kind, content)}
             onExportAll={() => void handleExportAll()}
             exporting={exporting}
+            renderProgress={renderProgress}
+            hasRenderSubtitles={Boolean(renderSubtitles)}
+            onDownloadSubtitles={() => void handleDownloadSubtitles()}
           />
         </main>
       ) : state.source ? (
@@ -481,6 +538,9 @@ export function Workspace() {
               onExport={(format, kind, content) => void handleExport(format, kind, content)}
               onExportAll={() => void handleExportAll()}
               exporting={exporting}
+              renderProgress={renderProgress}
+              hasRenderSubtitles={Boolean(renderSubtitles)}
+              onDownloadSubtitles={() => void handleDownloadSubtitles()}
             />
           </div>
         </main>
