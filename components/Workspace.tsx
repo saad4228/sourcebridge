@@ -279,11 +279,21 @@ export function Workspace() {
     setToast(result.ok ? `Downloaded ${result.data}` : result.error);
   }, []);
 
-  /** Return to the start, confirming first if completed work would be lost. */
-  const handleGoHome = useCallback(() => {
+  /**
+   * Return to the start, confirming first if completed work would be lost.
+   *
+   * Every path that clears the workspace comes through here. There used to be
+   * four of them and only this one asked: the brand mark confirmed, while "New
+   * transformation", the creative-mode "Start over" and the source panel's own
+   * reset each dispatched the reset directly. Nothing is persisted and the app
+   * warns before a page unload, so a single misclick on any of those three
+   * silently destroyed every generated artefact.
+   */
+  const handleReset = useCallback(() => {
     const { artifacts, source, creativePrompt } = stateRef.current;
-    const hasWork = Object.values(artifacts).some((a) => a?.status === 'complete');
     if (!source && !creativePrompt.trim()) return;
+
+    const hasWork = Object.values(artifacts).some((a) => a?.status === 'complete');
     if (hasWork) {
       const confirmed = window.confirm(
         'Start again? Generated artefacts are held in this tab only and will be lost. ' +
@@ -345,7 +355,7 @@ export function Workspace() {
           {/* The brand returns to the start, confirming first if work would be lost. */}
           <button
             type="button"
-            onClick={handleGoHome}
+            onClick={handleReset}
             aria-label="SourceBridge — return to the start"
             className="flex items-center gap-2.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-[var(--color-surface-sunken)]"
           >
@@ -382,7 +392,7 @@ export function Workspace() {
               </Badge>
             )}
             {state.source && (
-              <Button size="sm" variant="ghost" onClick={() => dispatch({ type: 'reset' })}>
+              <Button size="sm" variant="ghost" onClick={handleReset}>
                 New transformation
               </Button>
             )}
@@ -395,6 +405,9 @@ export function Workspace() {
               <Spinner />
               <span>
                 {progress.complete} of {progress.total} formats complete
+                {/* Two run at once, so saying how many are in flight explains
+                    why the count pauses between updates. */}
+                {progress.running > 0 && ` · ${progress.running} in progress`}
                 {progress.failed > 0 && ` · ${progress.failed} failed`}
               </span>
             </div>
@@ -452,7 +465,7 @@ export function Workspace() {
           <Panel
             title="Your prompt"
             actions={
-              <Button size="sm" variant="ghost" onClick={() => dispatch({ type: 'reset' })}>
+              <Button size="sm" variant="ghost" onClick={handleReset}>
                 Start over
               </Button>
             }
@@ -507,7 +520,7 @@ export function Workspace() {
               ledger={state.ledger}
               context={state.context}
               onContextChange={(context) => dispatch({ type: 'set_context', context })}
-              onReset={() => dispatch({ type: 'reset' })}
+              onReset={handleReset}
               highlightSegmentId={highlightId}
             />
           </div>

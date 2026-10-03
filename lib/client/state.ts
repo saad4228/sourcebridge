@@ -37,8 +37,6 @@ export interface WorkspaceState {
   artifacts: Partial<Record<FormatId, Artifact>>;
   /** Top-level error, e.g. extraction or analysis failure. */
   error: string | null;
-  /** Transient status line describing a real operation in progress. */
-  activity: string | null;
 }
 
 export const DEFAULT_BRIEF: GenerationBrief = {
@@ -60,7 +58,6 @@ export const initialState: WorkspaceState = {
   creativePrompt: '',
   artifacts: {},
   error: null,
-  activity: null,
 };
 
 export type Action =
@@ -101,7 +98,7 @@ export function reducer(state: WorkspaceState, action: Action): WorkspaceState {
       return { ...initialState, brief: state.brief };
 
     case 'extract_start':
-      return { ...state, stage: 'extracting', error: null, activity: 'Extracting source text' };
+      return { ...state, stage: 'extracting', error: null };
 
     case 'extract_success':
       return {
@@ -115,11 +112,10 @@ export function reducer(state: WorkspaceState, action: Action): WorkspaceState {
         ledger: null,
         artifacts: {},
         error: null,
-        activity: null,
       };
 
     case 'extract_failure':
-      return { ...state, stage: 'empty', error: action.error, activity: null };
+      return { ...state, stage: 'empty', error: action.error };
 
     case 'set_context':
       return { ...state, context: action.context };
@@ -138,7 +134,6 @@ export function reducer(state: WorkspaceState, action: Action): WorkspaceState {
         creativePrompt: action.prompt,
         brief: { ...state.brief, mode: 'creative' },
         error: null,
-        activity: null,
       };
 
     case 'set_brief':
@@ -152,13 +147,13 @@ export function reducer(state: WorkspaceState, action: Action): WorkspaceState {
     }
 
     case 'analyze_start':
-      return { ...state, stage: 'analyzing', error: null, activity: 'Analysing source' };
+      return { ...state, stage: 'analyzing', error: null };
 
     case 'analyze_success':
-      return { ...state, stage: 'analyzed', ledger: action.ledger, activity: null };
+      return { ...state, stage: 'analyzed', ledger: action.ledger };
 
     case 'analyze_failure':
-      return { ...state, stage: 'source_ready', error: action.error, activity: null };
+      return { ...state, stage: 'source_ready', error: action.error };
 
     case 'generate_start': {
       // Queue only the formats in this run; leave other artefacts untouched.
@@ -173,7 +168,7 @@ export function reducer(state: WorkspaceState, action: Action): WorkspaceState {
           findings: [],
         };
       }
-      return { ...state, stage: 'generating', artifacts, error: null, activity: null };
+      return { ...state, stage: 'generating', artifacts, error: null };
     }
 
     case 'artifact_start': {
@@ -228,7 +223,7 @@ export function reducer(state: WorkspaceState, action: Action): WorkspaceState {
     }
 
     case 'generate_finished':
-      return { ...state, stage: 'reviewing', activity: null };
+      return { ...state, stage: 'reviewing' };
 
     case 'edit_artifact': {
       const existing = state.artifacts[action.format];

@@ -78,7 +78,7 @@ video package, their timings are measured against the audio that was actually pr
 | --- | --- |
 | `npm run dev` | Development server on :3000 |
 | `npm run build` / `npm start` | Production build and serve |
-| `npm test` | **290 tests**, no API key required |
+| `npm test` | **316 tests**, no API key required |
 | `npm run test:watch` | Tests in watch mode |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
@@ -185,7 +185,7 @@ both is why one exhausted provider does not stop the application.
 ## Testing
 
 ```bash
-npm test          # 290 tests, no API key required
+npm test          # 316 tests, no API key required
 ```
 
 Covering extraction, schema validation, evidence resolution, meaning drift, the provenance chain,
@@ -254,7 +254,9 @@ Stated because the interface is not permitted to imply otherwise:
   source, qualifiers survive, content fits its layout. It does **not** check whether content is true.
 - **The provenance record is a hash chain, not a blockchain.** It establishes integrity and ordering
   over the source, ledger and artefacts. It does not prove the source document was authentic, and
-  nothing is anchored to an external ledger.
+  nothing is anchored to an external ledger. Every archive ships `verify.mjs`, so a recipient can
+  check the chain with `node verify.mjs` and no installation — a claim nobody can check is not
+  evidence of anything.
 - **Meaning-drift detection is lexical, not semantic.** It compares qualifiers in a cited passage
   against the output citing it. It does not understand the claim.
 - **No OCR.** Scanned PDFs are refused with a clear message. Images *are* supported, read by a vision
@@ -278,7 +280,7 @@ lib/export/     pptx · svg · video · bundle · deckTheme   (deterministic ren
 components/     Landing · Workspace · SourcePanel · ConfigPanel · OutputPanel
 samples/        synthetic source documents
 scripts/        smoke test, renderers, PDF builder
-tests/          290 tests
+tests/          316 tests
 docs/           ARCHITECTURE.md (2 pages) + PDF
 ```
 

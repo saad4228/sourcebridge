@@ -12,6 +12,7 @@ import type { FormatId, GenerationBrief } from '../types';
 import { FORMAT_SCHEMAS } from '../schemas';
 import type { Infographic, Presentation, VideoPackage } from '../schemas';
 import { buildAuditChain, renderProvenanceText } from '../audit';
+import { VERIFY_SCRIPT, VERIFY_SCRIPT_FILENAME } from './verifyScript';
 import { provenanceFooter, renderMarkdown } from './markdown';
 import { renderPresentationPptx } from './pptx';
 import { renderInfographicSvg } from './svg';
@@ -113,6 +114,10 @@ export async function renderBundle(
   });
   zip.file('provenance.json', JSON.stringify({ version: 1, entries: chain }, null, 2));
   zip.file('provenance.txt', renderProvenanceText(chain));
+  // The check travels with the record. Explaining the algorithm in prose left
+  // the integrity claim unverifiable by anyone unwilling to reimplement
+  // canonical JSON hashing correctly, which is nearly everyone.
+  zip.file(VERIFY_SCRIPT_FILENAME, VERIFY_SCRIPT);
 
   zip.file(
     'README.md',
@@ -136,6 +141,16 @@ export async function renderBundle(
       'ledger and every artefact above. Altering any of them breaks verification at that',
       'entry. It is a hash chain, not a blockchain: it establishes integrity and ordering,',
       'not authenticity of the original document.',
+      '',
+      'To check it yourself, with Node 18 or newer and no installation:',
+      '',
+      '```',
+      `node ${VERIFY_SCRIPT_FILENAME}`,
+      '```',
+      '',
+      'It recomputes every hash and reports the first entry that does not match, or',
+      'confirms the record is intact. A pass means this record has not been edited since',
+      'export — not that the content is correct.',
       '',
       '## Before you publish',
       '',

@@ -220,3 +220,66 @@ describe('infographic validation', () => {
     expect(findings.filter((f) => f.type === 'empty_field')).toHaveLength(0);
   });
 });
+
+/**
+ * A series longer than the layout can hold.
+ *
+ * The schema asks for two to five comparable values and the prompt says so,
+ * but neither is enforced -- and past about 28 bars the slot arithmetic gave
+ * every bar a negative width, which resvg silently discards. The chart then
+ * rasterised with its labels and value text intact and no bars at all, which
+ * is the worst way for a figure to fail.
+ */
+describe('an over-long series', () => {
+  const many = (count: number, kind: 'bar' | 'donut' = 'bar') =>
+    graphic({
+      layout: 'chart',
+      chart: {
+        kind,
+        categories: Array.from({ length: count }, (_, i) => `Ward ${i + 1}`),
+        values: Array.from({ length: count }, (_, i) => i + 1),
+        seriesName: 'Litres per household per day',
+      },
+    });
+
+  const widths = (svg: string) =>
+    [...svg.matchAll(/width="(-?[\d.]+)"/g)].map((m) => Number(m[1]));
+
+  it('never gives a bar a negative width', () => {
+    for (const count of [2, 5, 12, 29, 40, 120]) {
+      const svg = renderInfographicSvg(many(count));
+      expect(
+        widths(svg).every((w) => w > 0),
+        `a bar collapsed at ${count} values`,
+      ).toBe(true);
+    }
+  });
+
+  it('plots a readable number of bars rather than a forest of slivers', () => {
+    const svg = drawn(renderInfographicSvg(many(40)));
+    // Each bar carries its value above it, so counting those counts the bars.
+    const plotted = [...svg.matchAll(/<rect [^>]*rx="6"/g)].length;
+    expect(plotted).toBeGreaterThan(1);
+    expect(plotted).toBeLessThanOrEqual(8);
+  });
+
+  it('states how many values it left out instead of hiding them', () => {
+    expect(renderInfographicSvg(many(40))).toMatch(/32 further values are not plotted/);
+  });
+
+  it('says nothing when the whole series fits', () => {
+    expect(renderInfographicSvg(many(4))).not.toMatch(/not plotted/);
+  });
+
+  it('caps a donut too, where the five series colours would otherwise repeat', () => {
+    const svg = renderInfographicSvg(many(20, 'donut'));
+    expect(widths(svg).every((w) => w > 0)).toBe(true);
+    expect(svg).toMatch(/further values are not plotted/);
+  });
+
+  it('grows the canvas to fit the note, so it is not clipped', () => {
+    expect(canvasHeight(renderInfographicSvg(many(40)))).toBeGreaterThan(
+      canvasHeight(renderInfographicSvg(many(4))),
+    );
+  });
+});

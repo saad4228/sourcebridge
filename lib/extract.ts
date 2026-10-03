@@ -38,6 +38,93 @@ const SCANNED_PAGE_THRESHOLD = 20;
 const TARGET_SEGMENT_CHARS = 450;
 
 /**
+ * A line longer than this is split, rather than becoming one passage.
+ *
+ * Segmentation used to break only *between* lines, so the target above had no
+ * effect on prose that arrives as a single long line -- which is exactly what
+ * pasted text and web articles give: `blocksToText` emits one line per block
+ * element, so a three-paragraph article became three passages of 1,375
+ * characters, and 10,000 characters without a line break became one passage
+ * covering the whole document.
+ *
+ * That defeats the point of segmenting at all. Evidence links resolve to a
+ * passage, so one passage means every claim cites the entire source; and
+ * meaning-drift detection compares an output against the passage it cites, so
+ * an oversized passage lends its qualifiers to claims that never made them --
+ * reporting a dropped "preliminary" against a sentence that had nothing to
+ * qualify. Set above the target so a slightly long line is left whole rather
+ * than chopped into one full passage and one stub.
+ */
+const MAX_SEGMENT_CHARS = TARGET_SEGMENT_CHARS * 2;
+
+/**
+ * Break text on word boundaries at `limit`, for a line with no sentence
+ * punctuation to split on.
+ *
+ * A single token longer than the limit is broken mid-word. That is ugly, but
+ * the alternative is one passage holding an entire run-on document.
+ */
+function hardWrap(text: string, limit: number): string[] {
+  const out: string[] = [];
+  let line = '';
+
+  for (const word of text.trim().split(/\s+/).filter(Boolean)) {
+    const tokens =
+      word.length > limit ? (word.match(new RegExp(`.{1,${limit}}`, 'g')) ?? [word]) : [word];
+
+    for (const token of tokens) {
+      const candidate = line ? `${line} ${token}` : token;
+      if (line && candidate.length > limit) {
+        out.push(line);
+        line = token;
+      } else {
+        line = candidate;
+      }
+    }
+  }
+  if (line) out.push(line);
+  return out;
+}
+
+/**
+ * Split an over-long line into passage-sized pieces, keeping sentences whole.
+ *
+ * Sentence boundaries are the unit because a passage is quoted back to the
+ * operator as evidence: one that starts or stops mid-sentence cannot be read
+ * as the source's own words. A line with no sentence punctuation falls back to
+ * word boundaries.
+ */
+function splitLongLine(line: string): string[] {
+  if (line.length <= MAX_SEGMENT_CHARS) return [line];
+
+  const sentences = (line.match(/[^.!?]+(?:[.!?]+|$)/g) ?? [])
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const units = sentences.length > 1 ? sentences : hardWrap(line, TARGET_SEGMENT_CHARS);
+
+  const out: string[] = [];
+  let current = '';
+
+  for (const unit of units) {
+    // One sentence longer than a whole passage still has to be broken.
+    const parts =
+      unit.length > MAX_SEGMENT_CHARS ? hardWrap(unit, TARGET_SEGMENT_CHARS) : [unit];
+
+    for (const part of parts) {
+      const candidate = current ? `${current} ${part}` : part;
+      if (current && candidate.length > TARGET_SEGMENT_CHARS) {
+        out.push(current);
+        current = part;
+      } else {
+        current = candidate;
+      }
+    }
+  }
+  if (current) out.push(current);
+  return out;
+}
+
+/**
  * Rejoin lines that a PDF broke mid-sentence.
  *
  * PDF extraction returns one line per rendered line, so a paragraph arrives as
@@ -108,7 +195,10 @@ function segmentPage(
   const lines = text
     .split(/\n/)
     .map((l) => l.replace(/[ \t]+/g, ' ').trim())
-    .filter((l) => l.length > 0);
+    .filter((l) => l.length > 0)
+    // A single line can carry a whole document. Split it here, before blocks
+    // are formed, so the size rule below applies to it like any other line.
+    .flatMap(splitLongLine);
 
   const blocks: { heading?: string; lines: string[] }[] = [];
 

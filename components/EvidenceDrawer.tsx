@@ -26,14 +26,46 @@ export function EvidenceDrawer({
   onHighlight: (segmentId: string) => void;
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
 
-  // Close on Escape, and move focus into the drawer when it opens.
+  /**
+   * Close on Escape, move focus into the drawer, and keep Tab inside it.
+   *
+   * The drawer declares aria-modal, which tells a screen reader that the rest
+   * of the page is unavailable. Without trapping Tab that was not true: focus
+   * walked straight out into the workspace behind the overlay, where a
+   * keyboard user could operate controls their reader had been told to ignore.
+   */
   useEffect(() => {
     if (!ids) return;
     closeRef.current?.focus();
+
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') {
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+
+      const focusable = panelRef.current?.querySelectorAll<HTMLElement>(
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (!focusable || focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement;
+
+      // Wrap at both ends, and pull focus back if it has already escaped.
+      if (event.shiftKey && (active === first || !panelRef.current?.contains(active))) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && (active === last || !panelRef.current?.contains(active))) {
+        event.preventDefault();
+        first.focus();
+      }
     };
+
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [ids, onClose]);
@@ -51,7 +83,10 @@ export function EvidenceDrawer({
         className="absolute inset-0 bg-black/20"
       />
 
-      <aside className="relative flex h-full w-full max-w-md flex-col border-l border-[var(--color-rule)] bg-[var(--color-surface)] shadow-xl">
+      <aside
+        ref={panelRef}
+        className="relative flex h-full w-full max-w-md flex-col border-l border-[var(--color-rule)] bg-[var(--color-surface)] shadow-xl"
+      >
         <header className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--color-rule)] px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold text-[var(--color-ink)]">Supporting passages</h2>

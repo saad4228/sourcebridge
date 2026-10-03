@@ -80,12 +80,16 @@ No database, queue or vector store — none is justified at this scope.
 
 ## 5. Evidence and provenance
 
-Every passage carries a stable ID (`src-<hash>-p<page>-<n>`). Generated content cites those IDs, the
+Every passage carries a stable ID (`src-<id>-p<page>-<n>`). Generated content cites those IDs, the
 server resolves them and **discards any the model invented**, and clicking a claim opens the exact
-passage behind it.
+passage behind it. Passages are sized for quoting: a source is split on headings and sentence
+boundaries to roughly 450 characters, so a citation resolves to the sentence that supports it rather
+than to the whole document — which also keeps meaning-drift comparison precise.
 
 Each export ships `provenance.json`: a SHA-256 chain over the source text, the fact ledger and every
-artefact, each entry sealed over the one before it. Altering any recorded content breaks verification
+artefact, each entry sealed over the one before it, plus `verify.mjs` — a dependency-free checker so
+a recipient can confirm the chain with `node verify.mjs` rather than reimplementing it. Altering any
+recorded content breaks verification
 at that entry and identifies which.
 
 > This is a **hash chain, not a blockchain**. It establishes integrity and ordering. It does not
@@ -117,7 +121,7 @@ request larger than a model's allowance rotates immediately rather than retrying
 
 ## 8. Verification and deployment
 
-**290 automated tests** run without an API key, covering extraction, schema validation, evidence
+**316 automated tests** run without an API key, covering extraction, schema validation, evidence
 resolution, meaning drift, the provenance chain, prompt-injection boundaries, SSRF screening and
 every renderer. Exports are checked further by inspecting the produced OOXML and SVG, and by probing
 rendered video for valid H.264/AAC streams. Deploys as a single Next.js container; ffmpeg on the host

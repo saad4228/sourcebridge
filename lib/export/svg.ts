@@ -179,11 +179,50 @@ function drawStats(content: Infographic, y: number, ctx: Ctx): number {
   return y + height + 48;
 }
 
+/**
+ * How many values the chart will actually plot.
+ *
+ * The schema asks for two to five comparable values and the prompt says so,
+ * but neither is enforced -- a model's output is untrusted everywhere else in
+ * this file, and it was not here. Past about 28 bars the slot arithmetic gave
+ * each bar a NEGATIVE width, which resvg silently discards: the chart
+ * rasterised with its labels and value text intact and no bars at all, which
+ * is the worst possible failure for a figure. The donut has the same problem
+ * differently -- there are five series colours, so a long series repeats them
+ * and the legend runs for hundreds of pixels.
+ *
+ * So the series is capped, and what was left out is stated under the chart
+ * rather than dropped quietly: a reader who cannot see that bars are missing
+ * will read the ones shown as the whole picture.
+ */
+const MAX_CHART_BARS = 8;
+const MAX_DONUT_SLICES = 6;
+
+/** Never let a bar collapse to nothing, whatever the arithmetic above says. */
+const MIN_BAR_WIDTH = 6;
+
+/** A note stating values the chart does not plot. */
+function omittedNote(count: number, y: number, ctx: Ctx): number {
+  if (count <= 0) return y;
+  const text =
+    `${count} further value${count > 1 ? 's are' : ' is'} not plotted here — see the ` +
+    `accompanying text for the full series.`;
+  const block = textBlock(wrap(text, 78, 2, ctx.factor), PAD, y, {
+    size: 12,
+    fill: COLORS.faint,
+    lineHeight: 16,
+  });
+  ctx.parts.push(block.svg);
+  return y + block.height + 10;
+}
+
 /** A bar or donut chart drawn from the source values. */
 function drawChart(content: Infographic, y: number, ctx: Ctx): number {
   const chart = content.chart!;
-  const values = chart.values;
-  const categories = chart.categories;
+  const limit = chart.kind === 'donut' ? MAX_DONUT_SLICES : MAX_CHART_BARS;
+  const omitted = Math.max(chart.values.length - limit, 0);
+  const values = chart.values.slice(0, limit);
+  const categories = chart.categories.slice(0, limit);
 
   const titleLines = wrap(chart.seriesName, 60, 1, ctx.factor);
   if (chart.seriesName.trim()) {
@@ -223,14 +262,16 @@ function drawChart(content: Infographic, y: number, ctx: Ctx): number {
       legendY += 30;
     });
 
-    return Math.max(y + 220, legendY + 8) + 40;
+    const bottom = omittedNote(omitted, Math.max(y + 220, legendY + 8) + 12, ctx);
+    return bottom + 28;
   }
 
   // Vertical bars.
   const max = Math.max(...values.map((v) => Math.abs(v)), 1);
   const plotHeight = 180;
   const slot = INNER / values.length;
-  const barWidth = Math.min(slot - 24, 110);
+  // Floored, because a narrow slot made this negative and every bar vanished.
+  const barWidth = Math.max(Math.min(slot - 24, 110), MIN_BAR_WIDTH);
   const baseline = y + plotHeight + 26;
 
   ctx.parts.push(
@@ -261,7 +302,7 @@ function drawChart(content: Infographic, y: number, ctx: Ctx): number {
     ctx.parts.push(label.svg);
   });
 
-  return baseline + 62;
+  return omittedNote(omitted, baseline + 62, ctx) + (omitted > 0 ? 8 : 0);
 }
 
 /** Two panels set against each other. */
