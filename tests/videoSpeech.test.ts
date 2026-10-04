@@ -14,12 +14,13 @@
 
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 
-const synthesizeSpeech = vi.fn();
+const speakLine = vi.fn();
 
-// Mocked rather than exercised: a real call needs a key and costs quota, and
-// what matters here is which calls are made, not what the audio sounds like.
-vi.mock('@/lib/provider', () => ({
-  synthesizeSpeech: (text: string, voice: string) => synthesizeSpeech(text, voice),
+// The engine chain is mocked, not the provider: speech may come from the cloud
+// voice or from a local engine, and what matters here is how many lines are
+// spoken at all, not which engine spoke them.
+vi.mock('@/lib/export/speechEngines', () => ({
+  speakLine: (text: string, voice: string) => speakLine(text, voice),
 }));
 
 const { MAX_SCENES, renderVideo, resetSpeechCache, speakScene } = await import(
@@ -35,6 +36,7 @@ function speech(seconds: number, model = 'tts-a') {
     seconds,
     model,
     voice: 'Kore',
+    engine: 'gemini',
   };
 }
 
@@ -58,8 +60,8 @@ function pkg(count: number): VideoPackage {
 
 beforeEach(() => {
   resetSpeechCache();
-  synthesizeSpeech.mockReset();
-  synthesizeSpeech.mockImplementation(async () => speech(4));
+  speakLine.mockReset();
+  speakLine.mockImplementation(async () => speech(4));
 });
 
 afterEach(() => {
@@ -68,9 +70,9 @@ afterEach(() => {
 
 /** Speak a whole package's narration, reporting how many provider calls it cost. */
 async function speakAll(content: VideoPackage, voice = 'Kore'): Promise<number> {
-  synthesizeSpeech.mockClear();
+  speakLine.mockClear();
   for (const scene of content.scenes) await speakScene(scene.narration, voice);
-  return synthesizeSpeech.mock.calls.length;
+  return speakLine.mock.calls.length;
 }
 
 describe('speech reuse', () => {
@@ -92,7 +94,7 @@ describe('speech reuse', () => {
 
     expect(second.seconds).toBe(first.seconds);
     expect(second.pcm.byteLength).toBe(first.pcm.byteLength);
-    expect(synthesizeSpeech).toHaveBeenCalledTimes(1);
+    expect(speakLine).toHaveBeenCalledTimes(1);
   });
 
   it('re-speaks a scene whose narration was edited, and reuses the rest', async () => {
@@ -113,7 +115,7 @@ describe('speech reuse', () => {
   it('ignores surrounding whitespace, which is not a different line', async () => {
     await speakScene('Attribution remains unconfirmed.', 'Kore');
     await speakScene('  Attribution remains unconfirmed.\n', 'Kore');
-    expect(synthesizeSpeech).toHaveBeenCalledTimes(1);
+    expect(speakLine).toHaveBeenCalledTimes(1);
   });
 
   it('keys on the voice, so the same words in another voice are spoken again', async () => {
@@ -124,26 +126,26 @@ describe('speech reuse', () => {
   });
 
   it('does not cache a failure, so a transient error can be retried', async () => {
-    synthesizeSpeech.mockRejectedValueOnce(new Error('overloaded'));
+    speakLine.mockRejectedValueOnce(new Error('overloaded'));
     await expect(speakScene('One scene.', 'Kore')).rejects.toThrow(/overloaded/);
 
-    synthesizeSpeech.mockImplementation(async () => speech(3));
+    speakLine.mockImplementation(async () => speech(3));
     await expect(speakScene('One scene.', 'Kore')).resolves.toMatchObject({ seconds: 3 });
-    expect(synthesizeSpeech).toHaveBeenCalledTimes(2);
+    expect(speakLine).toHaveBeenCalledTimes(2);
   });
 
   it('starts empty after a reset, so one test cannot inherit another’s audio', async () => {
     await speakScene('A line.', 'Kore');
     resetSpeechCache();
     await speakScene('A line.', 'Kore');
-    expect(synthesizeSpeech).toHaveBeenCalledTimes(2);
+    expect(speakLine).toHaveBeenCalledTimes(2);
   });
 });
 
 describe('scene count', () => {
   it('refuses a package with no scenes before spending anything', async () => {
     await expect(renderVideo(pkg(0))).rejects.toThrow(/no scenes/i);
-    expect(synthesizeSpeech).not.toHaveBeenCalled();
+    expect(speakLine).not.toHaveBeenCalled();
   });
 
   it('caps a render well below a Detailed package, which can hold twelve scenes', () => {

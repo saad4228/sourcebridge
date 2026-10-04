@@ -22,7 +22,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { Resvg } from '@resvg/resvg-js';
 import type { VideoPackage } from '../schemas';
-import { synthesizeSpeech, type SpeechResult } from '../provider';
+import { speakLine, type SpokenAudio } from './speechEngines';
 import { FRAME_WIDTH, renderSceneCardSvg, renderTitleCardSvg } from './sceneCard';
 import { svgFontStack } from './fonts';
 
@@ -87,14 +87,14 @@ const TITLE_SECONDS = 2.5;
  * made anyway.
  */
 const SPEECH_CACHE_MAX_BYTES = 48 * 1024 * 1024;
-const speechCache = new Map<string, SpeechResult>();
+const speechCache = new Map<string, SpokenAudio>();
 let speechCacheBytes = 0;
 
 function speechKey(text: string, voice: string): string {
   return createHash('sha256').update(`${voice}\u0000${text.trim()}`).digest('hex');
 }
 
-function cacheSpeech(key: string, speech: SpeechResult): void {
+function cacheSpeech(key: string, speech: SpokenAudio): void {
   // Never cache something that cannot be evicted back under the cap.
   if (speech.pcm.byteLength > SPEECH_CACHE_MAX_BYTES) return;
 
@@ -116,12 +116,12 @@ function cacheSpeech(key: string, speech: SpeechResult): void {
  * what decides how many videos a day a free key can render, which is worth
  * asserting without standing up ffmpeg and a real encode.
  */
-export async function speakScene(text: string, voice: string): Promise<SpeechResult> {
+export async function speakScene(text: string, voice: string): Promise<SpokenAudio> {
   const key = speechKey(text, voice);
   const cached = speechCache.get(key);
   if (cached) return cached;
 
-  const speech = await synthesizeSpeech(text, voice);
+  const speech = await speakLine(text, voice);
   cacheSpeech(key, speech);
   return speech;
 }
@@ -287,6 +287,15 @@ export interface RenderedVideo {
   voice: string;
   ttsModel: string;
   /**
+   * Which engine spoke it.
+   *
+   * Reported because the voice is not always the same one: the cloud voice is
+   * preferred but has a daily ceiling, and a local engine takes over when it
+   * runs out. The operator should be able to tell which they got rather than
+   * wondering why one render sounds different from the last.
+   */
+  speechEngine: string;
+  /**
    * Scenes the package carried that the video does not.
    *
    * The renderer caps a video at MAX_SCENES, but a Detailed package can hold
@@ -381,7 +390,7 @@ export async function renderVideo(
     // the sum of the scenes into roughly the slowest few.
     options.onProgress?.(`Speaking ${scenes.length} scene${scenes.length > 1 ? 's' : ''}`);
 
-    const spoken = new Array<SpeechResult>(scenes.length);
+    const spoken = new Array<SpokenAudio>(scenes.length);
     let done = 0;
     const queue = scenes.map((scene, i) => ({ scene, i }));
 
@@ -405,6 +414,9 @@ export async function renderVideo(
     }));
     const sampleRate = spoken[0].sampleRate;
     const ttsModel = spoken[0].model;
+    // A render that began on the cloud voice can finish on a local one, so
+    // name every engine that contributed rather than only the first.
+    const speechEngine = [...new Set(spoken.map((s) => s.engine))].join(' + ');
 
     // Silence under the title card, in the same PCM format as the speech.
     const titleSilence = Buffer.alloc(Math.round(TITLE_SECONDS * sampleRate) * 2);
@@ -482,6 +494,7 @@ export async function renderVideo(
       scenes: durations,
       voice,
       ttsModel,
+      speechEngine,
       droppedScenes,
     };
   } finally {

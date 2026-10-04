@@ -42,7 +42,8 @@ GEMINI_API_KEY=your-key-here
 
 - **Both keys** → fastest, all features.
 - **Gemini only** → everything works, more slowly.
-- **Groq only** → all seven formats generate, but image and video sources are refused.
+- **Groq only** → all seven formats generate, but image and video *sources* are refused. Video
+  *rendering* still works: narration falls back to a local engine that needs no key.
 
 `.env.local` is gitignored. **Keys are read only on the server** and never reach the browser.
 
@@ -69,6 +70,32 @@ slides with narration over them. Desktop machines have fonts already; a minimal 
 which is why the Docker image installs the Noto families. The renderer refuses with an explanation
 rather than producing a silent blank video.
 
+### Narration has no daily limit
+
+Speech used to be the one hard ceiling here. The provider meters it **per project, per model, per
+day** — the refusal names the quota as `GenerateRequestsPerDayPerProjectPerModel-FreeTier` — and
+every scene costs one request, so a single six-scene video could spend the whole free allowance.
+Adding keys from the same Google project does not help, because the count is against the project.
+A public demo had roughly one video a day in it, however many people visited.
+
+So narration is not tied to one provider. Any engine that turns a line into audio can serve it, and
+the local ones have no quota at all:
+
+| Engine | Quota | Quality | Needs |
+| --- | --- | --- | --- |
+| Gemini | per project, per model, per day | best | `GEMINI_API_KEY` |
+| Piper | none | close to Gemini | a voice model (`PIPER_VOICE`) |
+| eSpeak NG | none | synthetic but clear | `espeak-ng` — in the Docker image |
+
+The default is `auto`: the cloud voice while it lasts, then a local one. **Running out changes the
+voice rather than ending the render**, which is the same rule the text chain already follows. Set
+`VIDEO_TTS_ENGINE=local` to skip the cloud entirely — no quota, and faster, since nothing waits on a
+network. Each render reports which engine spoke it.
+
+A public URL has no accounts, so one visitor can also be limited to
+`VIDEO_RENDERS_PER_HOUR` renders (3 by default; `0` turns it off, which is reasonable once speech is
+local and the only cost is CPU).
+
 Speaking the scenes is essentially the whole render: on six scenes, 33s to speak them against under
 2s to draw every frame and under 1s to encode. Scenes are therefore spoken four at a time
 (`VIDEO_TTS_CONCURRENCY`) and the frames are drawn while the provider is still talking, which
@@ -90,7 +117,7 @@ that was actually produced.
 | --- | --- |
 | `npm run dev` | Development server on :3000 |
 | `npm run build` / `npm start` | Production build and serve |
-| `npm test` | **322 tests**, no API key required |
+| `npm test` | **350 tests**, no API key required |
 | `npm run test:watch` | Tests in watch mode |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
@@ -197,7 +224,7 @@ both is why one exhausted provider does not stop the application.
 ## Testing
 
 ```bash
-npm test          # 322 tests, no API key required
+npm test          # 350 tests, no API key required
 ```
 
 Covering extraction, schema validation, evidence resolution, meaning drift, the provenance chain,
@@ -292,7 +319,7 @@ lib/export/     pptx · svg · video · bundle · deckTheme   (deterministic ren
 components/     Landing · Workspace · SourcePanel · ConfigPanel · OutputPanel
 samples/        synthetic source documents
 scripts/        smoke test, renderers, PDF builder
-tests/          322 tests
+tests/          350 tests
 docs/           ARCHITECTURE.md (2 pages) + PDF
 ```
 

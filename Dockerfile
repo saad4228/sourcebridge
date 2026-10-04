@@ -3,49 +3,61 @@
 # The Node runtime is required: PDF extraction (unpdf) and PPTX generation
 # (pptxgenjs) are not edge-compatible.
 
-FROM node:22-alpine AS deps
+FROM node:22-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-FROM node:22-alpine AS builder
+FROM node:22-slim AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 # No API key is needed to build; it is read at request time.
 RUN npm run build
 
-FROM node:22-alpine AS runner
+FROM node:22-slim AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 # Bind on every interface: a platform routes to the container, not to loopback.
 ENV HOSTNAME=0.0.0.0
 
-# ffmpeg is what makes this image worth building rather than deploying
-# serverless. Without it the MP4 export is unavailable -- the application
-# detects that and offers the video package instead, but the feature is gone.
+# Debian rather than Alpine, for one reason: eSpeak NG. Narration used to come
+# only from the cloud, which meters speech per project per model per DAY -- so
+# a single six-scene video could spend the whole free allowance and the site
+# had roughly one video a day in it however many people visited. A local engine
+# removes that ceiling entirely, and the Debian packages for it are the ones
+# that work without hunting for musl builds.
 #
-# The fonts are not optional either, and their absence was far more damaging
-# than a missing ffmpeg: this base image ships NO fonts at all, and resvg draws
+# ffmpeg is what makes this image worth building rather than deploying
+# serverless, and it now does double duty: every speech engine's output is
+# normalised through it to one PCM format.
+#
+# The fonts are not optional either, and their absence was the most damaging of
+# the three: the previous base image shipped NO fonts at all, and resvg draws
 # text only with a font it can find. With none, it does not warn or substitute
 # -- it draws no glyphs. Renders completed, played correctly, and showed
 # narration over blank slides, because the one thing that reports nothing is a
 # video that looks fine to the encoder.
 #
-# font-noto covers Latin; the Devanagari, Bengali, Tamil and Telugu packages
-# cover the scripts the exporters claim to support, which were equally blank.
-RUN apk add --no-cache \
+# fonts-noto-core covers Latin; the Indic package covers the Devanagari,
+# Bengali, Tamil and Telugu the exporters claim to support, which were equally
+# blank.
+#
+# The two checks at the end fail the build rather than ship an image that
+# renders blank slides, or one that stops rendering the moment the daily
+# cloud-speech allowance runs out.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
       ffmpeg \
-      font-noto \
-      font-noto-devanagari \
-      font-noto-bengali \
-      font-noto-tamil \
-      font-noto-telugu \
+      espeak-ng \
+      fonts-noto-core \
+      fonts-indic \
       fontconfig \
+ && rm -rf /var/lib/apt/lists/* \
  && fc-cache -f \
- # Fail the build rather than ship an image that renders blank slides again.
- && fc-list | grep -qi noto
+ && fc-list | grep -qi noto \
+ && espeak-ng --version
 
 # Render video frames at 1280 rather than 1920 by default.
 #
@@ -63,7 +75,7 @@ RUN apk add --no-cache \
 #   docker run -e VIDEO_RENDER_WIDTH=1920 ...
 ENV VIDEO_RENDER_WIDTH=1280
 
-RUN addgroup -S app && adduser -S app -G app
+RUN groupadd -r app && useradd -r -g app app
 
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/node_modules ./node_modules
@@ -81,5 +93,12 @@ EXPOSE 3000
 #
 #   docker run -e GROQ_API_KEY=... -e GEMINI_API_KEY=... -p 3000:3000 sourcebridge
 #
-# Either key alone works: Groq covers text, Gemini adds vision and narration.
+# Either key alone works: Groq covers text, Gemini adds vision and the better
+# narration voice. Video still renders with NO key for speech at all, because
+# eSpeak NG is installed above and has no quota -- set VIDEO_TTS_ENGINE=local
+# to skip the cloud voice entirely, which is also faster.
+#
+# For a neural local voice instead, mount a Piper model and point at it:
+#
+#   docker run -v /voices:/voices -e PIPER_VOICE=/voices/en_GB-alba-medium.onnx ...
 CMD ["npm", "run", "start"]

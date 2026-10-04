@@ -8,6 +8,8 @@ import { provenanceFooter, renderMarkdown } from '@/lib/export/markdown';
 import { renderBundle } from '@/lib/export/bundle';
 import { MAX_SCENES, VideoRenderError, renderVideo } from '@/lib/export/video';
 import { beginJob, isRenderId, recordProgress, updateJob } from '@/lib/export/renderJobs';
+import { callerKey, consume, refund, retryMessage, videoRenderLimit } from '@/lib/rateLimit';
+import { SpeechError } from '@/lib/export/speechEngines';
 import { ProviderError } from '@/lib/provider';
 import { briefWireSchema } from '@/lib/wire';
 import { FORMAT_IDS } from '@/lib/types';
@@ -182,6 +184,35 @@ export async function POST(request: Request) {
         if (body.format !== 'video_package') {
           return NextResponse.json({ error: 'MP4 export applies only to video packages.' }, { status: 400 });
         }
+        // Rendering is the one export expensive enough to ration. Without a
+        // limit a single visitor refreshing could take the day's speech
+        // allowance from everyone else, and there are no accounts to appeal to.
+        const { limit, windowMs } = videoRenderLimit();
+        const caller = callerKey(request);
+        const quota = limit > 0 ? consume(caller, limit, windowMs) : null;
+
+        if (quota && !quota.allowed) {
+          return NextResponse.json(
+            {
+              error:
+                `This site allows ${limit} video render${limit === 1 ? '' : 's'} per hour per ` +
+                `visitor, so one person cannot use up what everyone else needs. ` +
+                `${retryMessage(quota.resetAt)} Every other format, and the video package ` +
+                `(.zip), are unaffected.`,
+              kind: 'rate_limited',
+            },
+            {
+              status: 429,
+              headers: {
+                'Retry-After': String(Math.max(1, Math.ceil((quota.resetAt - Date.now()) / 1000))),
+                'X-RateLimit-Limit': String(limit),
+                'X-RateLimit-Remaining': '0',
+                'X-RateLimit-Reset': String(Math.floor(quota.resetAt / 1000)),
+              },
+            },
+          );
+        }
+
         const renderId = isRenderId(body.renderId) ? body.renderId : null;
         const scenes = (content as VideoPackage).scenes?.length ?? 0;
         if (renderId) beginJob(renderId, Math.min(scenes, MAX_SCENES));
@@ -212,6 +243,10 @@ export async function POST(request: Request) {
           response.headers.set('X-Video-Seconds', rendered.totalSeconds.toFixed(1));
           response.headers.set('X-Video-Voice', rendered.voice);
           response.headers.set('X-Video-Tts-Model', rendered.ttsModel);
+          // Which voice spoke it: the cloud one has a daily ceiling, so a
+          // local engine may have taken over part-way through.
+          response.headers.set('X-Video-Speech-Engine', rendered.speechEngine);
+          if (quota) response.headers.set('X-RateLimit-Remaining', String(quota.remaining));
           if (rendered.droppedScenes > 0) {
             response.headers.set('X-Video-Scenes-Dropped', String(rendered.droppedScenes));
           }
@@ -224,6 +259,10 @@ export async function POST(request: Request) {
               error: err instanceof Error ? err.message : 'The render failed.',
             });
           }
+          // A render that produced nothing should not count against the
+          // caller's allowance: being charged for a failure would mean a host
+          // misconfiguration locks someone out for the rest of the hour.
+          if (quota) refund(caller);
           throw err;
         }
       }
@@ -254,6 +293,17 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: err.message, kind: err.kind },
         { status: missingCapability ? 501 : 500 },
+      );
+    }
+
+    // Narration failed on every engine there was. 'unavailable' means the host
+    // offers none at all, which is a setup gap rather than a fault, and the
+    // message already names what to install; 'failed' means they were there
+    // and refused, which is upstream.
+    if (err instanceof SpeechError) {
+      return NextResponse.json(
+        { error: err.message, kind: 'speech', code: err.kind },
+        { status: err.kind === 'unavailable' ? 501 : 502 },
       );
     }
 
