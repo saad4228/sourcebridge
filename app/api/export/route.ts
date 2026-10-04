@@ -248,10 +248,12 @@ export async function POST(request: Request) {
     }
   } catch (err) {
     if (err instanceof VideoRenderError) {
-      // A missing ffmpeg is a host capability gap, not a bad request.
+      // Missing ffmpeg, or no font to draw frames with, are both gaps in what
+      // the host provides rather than anything wrong with the request.
+      const missingCapability = err.kind === 'no_ffmpeg' || err.kind === 'no_fonts';
       return NextResponse.json(
         { error: err.message, kind: err.kind },
-        { status: err.kind === 'no_ffmpeg' ? 501 : 500 },
+        { status: missingCapability ? 501 : 500 },
       );
     }
 

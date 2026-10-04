@@ -35,9 +35,20 @@ describe('font selection', () => {
   });
 
   it('leaves Latin content on the default stack', () => {
-    expect(svgFontStack('latin')).toBe('Segoe UI, Helvetica, Arial, sans-serif');
+    expect(svgFontStack('latin')).toMatch(/^Segoe UI, Helvetica, Arial,/);
+    expect(svgFontStack('latin')).toMatch(/sans-serif$/);
     // undefined lets PptxGenJS use its own default rather than forcing a face.
     expect(pptxFontFace('latin')).toBeUndefined();
+  });
+
+  it('names a font a Linux container actually has', () => {
+    // The server rasterises these same stacks for video frames. Naming only
+    // Windows and macOS faces meant resvg found nothing on a container, and it
+    // does not warn or substitute -- it draws no glyphs, so every frame came
+    // out blank with the narration playing over it.
+    for (const script of ['latin', 'devanagari', 'bengali', 'tamil', 'telugu'] as const) {
+      expect(svgFontStack(script), script).toMatch(/Noto Sans|DejaVu Sans|Liberation Sans/);
+    }
   });
 
   it('sets a single covering family for PPTX Indic runs', () => {

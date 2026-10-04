@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { Resvg } from '@resvg/resvg-js';
 import {
   VideoRenderError,
+  canRenderText,
   cuesForScene,
   isFfmpegAvailable,
   renderVideo,
+  resetFontProbe,
   srtTimestamp,
 } from '@/lib/export/video';
+import { svgFontStack } from '@/lib/export/fonts';
 import { FRAME_HEIGHT, FRAME_WIDTH, renderSceneCardSvg, renderTitleCardSvg } from '@/lib/export/sceneCard';
 import type { VideoPackage } from '@/lib/schemas';
 
@@ -149,4 +152,67 @@ describe('scene frames', () => {
     expect(svg).toContain('…');
     expect(svg).not.toContain('A'.repeat(300));
   });
+});
+
+/**
+ * Text on the frames.
+ *
+ * resvg draws text only with a font it can find, and a minimal container image
+ * ships none -- node:22-alpine has zero. When the family in the SVG resolves to
+ * nothing, resvg neither warns nor substitutes: it draws no glyphs. The render
+ * then succeeds, the file plays, and the viewer gets narration over blank
+ * slides. Nothing in the pipeline reports it, which is why it reached a
+ * deployment and why the renderer now refuses rather than producing one.
+ */
+describe('frames without a usable font', () => {
+  const probe = (text: string) =>
+    `<svg xmlns="http://www.w3.org/2000/svg" width="240" height="80">` +
+    `<text x="8" y="56" font-family="${svgFontStack('latin')}" font-size="48" fill="#000">${text}</text></svg>`;
+
+  it('draws glyphs when a font is available', () => {
+    const drawn = new Resvg(probe('Ag8'), { font: { loadSystemFonts: true } }).render().asPng();
+    const blank = new Resvg(probe(''), { font: { loadSystemFonts: true } }).render().asPng();
+    expect(Buffer.compare(Buffer.from(drawn), Buffer.from(blank))).not.toBe(0);
+  });
+
+  it('is detectable: no font means the text contributes nothing at all', () => {
+    // Exactly the container case, reproduced by denying resvg system fonts.
+    const drawn = new Resvg(probe('Ag8'), { font: { loadSystemFonts: false } }).render().asPng();
+    const blank = new Resvg(probe(''), { font: { loadSystemFonts: false } }).render().asPng();
+    expect(Buffer.compare(Buffer.from(drawn), Buffer.from(blank))).toBe(0);
+  });
+
+  it('reports this machine can draw text, so the other cases mean something', () => {
+    resetFontProbe();
+    expect(canRenderText()).toBe(true);
+  });
+
+  it('reports a host with no font at all', () => {
+    // Exactly the container case: no system fonts and no font directory.
+    process.env.VIDEO_FONT_LOAD_SYSTEM = '0';
+    resetFontProbe();
+    try {
+      expect(canRenderText()).toBe(false);
+    } finally {
+      delete process.env.VIDEO_FONT_LOAD_SYSTEM;
+      resetFontProbe();
+    }
+  });
+
+  it('refuses the render, naming the fix, before spending any speech quota', async () => {
+    process.env.VIDEO_FONT_LOAD_SYSTEM = '0';
+    resetFontProbe();
+    try {
+      // The message has to say what went wrong, what to do about it on the
+      // hosts this actually happens on, and that the package export still works.
+      await expect(renderVideo(pkg)).rejects.toThrow(/no font available/i);
+      await expect(renderVideo(pkg)).rejects.toThrow(/apk add font-noto|fonts-noto-core/);
+      await expect(renderVideo(pkg)).rejects.toThrow(/video package/i);
+      await expect(renderVideo(pkg)).rejects.toBeInstanceOf(VideoRenderError);
+    } finally {
+      delete process.env.VIDEO_FONT_LOAD_SYSTEM;
+      resetFontProbe();
+    }
+  });
+
 });

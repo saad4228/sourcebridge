@@ -25,7 +25,27 @@ ENV HOSTNAME=0.0.0.0
 # ffmpeg is what makes this image worth building rather than deploying
 # serverless. Without it the MP4 export is unavailable -- the application
 # detects that and offers the video package instead, but the feature is gone.
-RUN apk add --no-cache ffmpeg
+#
+# The fonts are not optional either, and their absence was far more damaging
+# than a missing ffmpeg: this base image ships NO fonts at all, and resvg draws
+# text only with a font it can find. With none, it does not warn or substitute
+# -- it draws no glyphs. Renders completed, played correctly, and showed
+# narration over blank slides, because the one thing that reports nothing is a
+# video that looks fine to the encoder.
+#
+# font-noto covers Latin; the Devanagari, Bengali, Tamil and Telugu packages
+# cover the scripts the exporters claim to support, which were equally blank.
+RUN apk add --no-cache \
+      ffmpeg \
+      font-noto \
+      font-noto-devanagari \
+      font-noto-bengali \
+      font-noto-tamil \
+      font-noto-telugu \
+      fontconfig \
+ && fc-cache -f \
+ # Fail the build rather than ship an image that renders blank slides again.
+ && fc-list | grep -qi noto
 
 # Render video frames at 1280 rather than 1920 by default.
 #

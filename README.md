@@ -63,10 +63,22 @@ sudo apt install ffmpeg           # Debian/Ubuntu
 
 If ffmpeg lives somewhere unusual, set `FFMPEG_PATH` to the binary.
 
-A render speaks every scene, so it takes a few minutes and the interface reports which scene it is
-on. Narration already spoken is reused, so retrying a render that failed part-way costs no further
-speech quota. Afterwards the subtitles are offered as a separate `.srt` — unlike the ones in the
-video package, their timings are measured against the audio that was actually produced.
+**A font is required too.** Frames are drawn by resvg, which renders text only with a font it can
+find — and when it cannot find one it does not warn or substitute, it draws no glyphs, giving blank
+slides with narration over them. Desktop machines have fonts already; a minimal container does not,
+which is why the Docker image installs the Noto families. The renderer refuses with an explanation
+rather than producing a silent blank video.
+
+Speaking the scenes is essentially the whole render: on six scenes, 33s to speak them against under
+2s to draw every frame and under 1s to encode. Scenes are therefore spoken four at a time
+(`VIDEO_TTS_CONCURRENCY`) and the frames are drawn while the provider is still talking, which
+measured 37.7s → 20.1s on a four-scene package. The floor is one speech call, so a longer package
+costs little more than a short one.
+
+The interface reports which scene it is on. Narration already spoken is reused, so retrying a render
+that failed part-way costs no further speech quota. Afterwards the subtitles are offered as a
+separate `.srt` — unlike the ones in the video package, their timings are measured against the audio
+that was actually produced.
 
 **Requires Node.js 20+.** Developed on Node 24.18.0 / npm 11.16.0.
 
@@ -78,7 +90,7 @@ video package, their timings are measured against the audio that was actually pr
 | --- | --- |
 | `npm run dev` | Development server on :3000 |
 | `npm run build` / `npm start` | Production build and serve |
-| `npm test` | **316 tests**, no API key required |
+| `npm test` | **322 tests**, no API key required |
 | `npm run test:watch` | Tests in watch mode |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
@@ -185,7 +197,7 @@ both is why one exhausted provider does not stop the application.
 ## Testing
 
 ```bash
-npm test          # 316 tests, no API key required
+npm test          # 322 tests, no API key required
 ```
 
 Covering extraction, schema validation, evidence resolution, meaning drift, the provenance chain,
@@ -280,7 +292,7 @@ lib/export/     pptx · svg · video · bundle · deckTheme   (deterministic ren
 components/     Landing · Workspace · SourcePanel · ConfigPanel · OutputPanel
 samples/        synthetic source documents
 scripts/        smoke test, renderers, PDF builder
-tests/          316 tests
+tests/          322 tests
 docs/           ARCHITECTURE.md (2 pages) + PDF
 ```
 

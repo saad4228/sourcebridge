@@ -37,7 +37,12 @@ export function detectScript(text: string): Script {
  * generic fallback so the file travels between machines.
  */
 export function svgFontStack(script: Script): string {
-  const latin = 'Segoe UI, Helvetica, Arial, sans-serif';
+  // Noto and DejaVu are named before the generic fallback because the server
+  // rasterises these same stacks for video frames, and a Linux container has
+  // neither Segoe UI nor Arial. Naming only Windows and macOS faces meant
+  // resvg found nothing to draw with and silently rendered no text at all --
+  // a video of blank slides with narration over them.
+  const latin = 'Segoe UI, Helvetica, Arial, Noto Sans, DejaVu Sans, Liberation Sans, sans-serif';
   switch (script) {
     case 'devanagari':
       return `Nirmala UI, Noto Sans Devanagari, Kohinoor Devanagari, Mangal, ${latin}`;
