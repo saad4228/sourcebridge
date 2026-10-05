@@ -47,6 +47,8 @@ function renderWidth(): number {
   return Number.isFinite(configured) && configured >= 640 ? Math.round(configured) : FRAME_WIDTH;
 }
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /** Scenes beyond this make the render slow and the quota cost high. */
 export const MAX_SCENES = 8;
 
@@ -498,6 +500,20 @@ export async function renderVideo(
       droppedScenes,
     };
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    // Tidying up must never fail a render that has already produced its file.
+    // On Windows the encoder's handles can outlive the process by a moment,
+    // and the removal then throws ENOTEMPTY -- which discarded a complete
+    // video because the temporary directory was still busy. One retry covers
+    // the race; beyond that a stray directory in the system temp folder is a
+    // far smaller problem than losing the render.
+    for (const delay of [0, 150]) {
+      if (delay) await sleep(delay);
+      try {
+        await rm(dir, { recursive: true, force: true });
+        break;
+      } catch (err) {
+        if (delay) console.warn(`[video] could not remove ${dir}`, err);
+      }
+    }
   }
 }
