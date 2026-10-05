@@ -230,12 +230,13 @@ const espeakEngine: SpeechEngine = {
   name: 'espeak',
   available: () => isInstalled(espeakBin(), '--version'),
   async speak(text) {
+    const voice = await espeakVoice();
     const pcm = await speakToFile(
       'eSpeak NG',
       (outFile) => ({
         bin: espeakBin(),
         args: [
-          '-v', process.env.ESPEAK_VOICE?.trim() || 'en-gb',
+          '-v', voice,
           // Slightly under the default, which runs fast for narration.
           '-s', process.env.ESPEAK_WPM?.trim() || '160',
           '-w', outFile,
@@ -245,12 +246,53 @@ const espeakEngine: SpeechEngine = {
       }),
       text,
     );
-    return { pcm, sampleRate: SPEECH_SAMPLE_RATE, model: 'espeak-ng', voice: 'espeak' };
+    return { pcm, sampleRate: SPEECH_SAMPLE_RATE, model: `espeak-ng:${voice}`, voice: 'espeak' };
   },
 };
 
 function espeakBin(): string {
   return process.env.ESPEAK_PATH?.trim() || 'espeak-ng';
+}
+
+/**
+ * The best eSpeak voice this host can actually produce.
+ *
+ * eSpeak's own synthesis is formant-based and sounds like a machine from the
+ * nineties, which is a poor thing to put under a video someone will show to an
+ * audience. MBROLA voices are diphone recordings of a real speaker driven by
+ * the same engine: markedly more natural, the same negligible CPU cost, and
+ * free. They need a voice package that may or may not be installed, so rather
+ * than probing for it, the better voice is simply tried first and the result
+ * remembered. A host without it pays one failed attempt, once per process.
+ */
+const MBROLA_VOICE = 'mb-en1';
+let resolvedVoice: string | undefined;
+
+async function espeakVoice(): Promise<string> {
+  const configured = process.env.ESPEAK_VOICE?.trim();
+  if (configured) return configured;
+  if (resolvedVoice) return resolvedVoice;
+
+  const dir = await mkdtemp(path.join(tmpdir(), 'sourcebridge-voice-'));
+  try {
+    const probe = path.join(dir, 'probe.wav');
+    const { code } = await run(
+      espeakBin(),
+      ['-v', MBROLA_VOICE, '-w', probe, '--stdin'],
+      'test',
+    );
+    resolvedVoice = code === 0 ? MBROLA_VOICE : 'en-gb';
+  } catch {
+    resolvedVoice = 'en-gb';
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+  return resolvedVoice;
+}
+
+/** Visible to tests, which need to probe more than one configuration. */
+export function resetVoiceProbe(): void {
+  resolvedVoice = undefined;
 }
 
 const ENGINES: Record<string, SpeechEngine> = {

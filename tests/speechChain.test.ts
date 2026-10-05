@@ -24,7 +24,7 @@ vi.mock('@google/genai', () => ({
   },
 }));
 
-const { synthesizeSpeech } = await import('@/lib/provider');
+const { synthesizeSpeech, geminiKeys } = await import('@/lib/provider');
 
 const ORIGINAL = { ...process.env };
 
@@ -176,5 +176,90 @@ describe('speech synthesis', () => {
     generateContent.mockResolvedValue(audio());
     const next = await run(synthesizeSpeech('Scene two.'));
     expect(next.model).toBe(a);
+  });
+});
+
+/**
+ * Several keys.
+ *
+ * The free allowance is counted per PROJECT, per model, per day. A second key
+ * on the same project therefore buys nothing, and a key from another Google
+ * account doubles it outright. That is the only way to have MORE of the good
+ * voice rather than a worse one, so the chain walks every combination of key
+ * and model before giving up and letting a local engine take over.
+ */
+describe('multiple keys', () => {
+  beforeEach(() => {
+    delete process.env.GEMINI_API_KEYS;
+  });
+
+  it('uses the single key when only one is configured', () => {
+    process.env.GEMINI_API_KEY = 'only-key';
+    expect(geminiKeys()).toEqual(['only-key']);
+  });
+
+  it('keeps the original key first, so an existing deployment is unchanged', () => {
+    process.env.GEMINI_API_KEY = 'first';
+    process.env.GEMINI_API_KEYS = 'second, third';
+    expect(geminiKeys()).toEqual(['first', 'second', 'third']);
+  });
+
+  it('ignores a key repeated across both settings', () => {
+    process.env.GEMINI_API_KEY = 'same';
+    process.env.GEMINI_API_KEYS = 'same, other';
+    expect(geminiKeys()).toEqual(['same', 'other']);
+  });
+
+  it('works with no primary key at all', () => {
+    delete process.env.GEMINI_API_KEY;
+    process.env.GEMINI_API_KEYS = 'a,b';
+    expect(geminiKeys()).toEqual(['a', 'b']);
+  });
+
+  it('moves to the next key when the first has spent its day', async () => {
+    const [model] = chainOf(1);
+    process.env.GEMINI_API_KEY = 'spent-account';
+    process.env.GEMINI_API_KEYS = 'fresh-account';
+
+    generateContent.mockRejectedValueOnce(exhausted()).mockResolvedValueOnce(audio());
+    const result = await run(synthesizeSpeech('One line.'));
+
+    // Same model, different project: a genuinely separate allowance.
+    expect(result.model).toBe(model);
+    expect(generateContent).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not ask a spent key again on the next scene', async () => {
+    chainOf(1);
+    process.env.GEMINI_API_KEY = 'spent-account';
+    process.env.GEMINI_API_KEYS = 'fresh-account';
+
+    generateContent.mockRejectedValueOnce(exhausted()).mockResolvedValueOnce(audio());
+    await run(synthesizeSpeech('Scene one.'));
+
+    generateContent.mockReset();
+    generateContent.mockResolvedValue(audio());
+    await run(synthesizeSpeech('Scene two.'));
+
+    // Straight to the key that answered, rather than rediscovering the spent one.
+    expect(generateContent).toHaveBeenCalledTimes(1);
+  });
+
+  it('tries every key and model before giving up', async () => {
+    chainOf(2);
+    process.env.GEMINI_API_KEY = 'key-a';
+    process.env.GEMINI_API_KEYS = 'key-b,key-c';
+    generateContent.mockRejectedValue(exhausted());
+
+    await expect(run(synthesizeSpeech('One line.'))).rejects.toThrow();
+    // 2 models x 3 keys: every separate allowance was given a turn.
+    expect(generateContent).toHaveBeenCalledTimes(6);
+  });
+
+  it('reports no key configured rather than failing obscurely', async () => {
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.GEMINI_API_KEYS;
+
+    await expect(synthesizeSpeech('One line.')).rejects.toThrow(/needs a Gemini key/i);
   });
 });

@@ -66,7 +66,7 @@ export class ProviderError extends Error {
 
 /** True when text generation can run on at least one provider. */
 export function isProviderConfigured(): boolean {
-  return Boolean(process.env.GEMINI_API_KEY?.trim() || process.env.GROQ_API_KEY?.trim());
+  return Boolean(geminiKeys().length > 0 || process.env.GROQ_API_KEY?.trim());
 }
 
 /**
@@ -78,18 +78,46 @@ export function isProviderConfigured(): boolean {
  * key instead of failing part-way through an upload.
  */
 export function isVisionConfigured(): boolean {
-  return Boolean(process.env.GEMINI_API_KEY?.trim());
+  return geminiKeys().length > 0;
+}
+
+/**
+ * Every Gemini key configured, in order.
+ *
+ * The free allowance is counted per PROJECT, per model, per day -- the refusal
+ * names it `GenerateRequestsPerDayPerProjectPerModel-FreeTier`. So a second key
+ * on the same project buys nothing, and a key from a different Google account
+ * doubles the allowance outright. That is the only way to have more of the good
+ * voice rather than a worse one: a handful of keys from separate accounts
+ * multiplies how many videos a day can be narrated properly.
+ *
+ * GEMINI_API_KEY is kept as the first entry so an existing deployment behaves
+ * exactly as before, and GEMINI_API_KEYS adds the rest.
+ */
+export function geminiKeys(): string[] {
+  const primary = process.env.GEMINI_API_KEY?.trim();
+  const extra = (process.env.GEMINI_API_KEYS?.trim() ?? '')
+    .split(',')
+    .map((k) => k.trim())
+    .filter(Boolean);
+
+  return [...new Set([...(primary ? [primary] : []), ...extra])];
+}
+
+/** A client for one specific key. */
+function clientFor(apiKey: string): GoogleGenAI {
+  return new GoogleGenAI({ apiKey });
 }
 
 function client(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
+  const [apiKey] = geminiKeys();
   if (!apiKey) {
     throw new ProviderError(
       'This step needs a Gemini key. Add GEMINI_API_KEY to .env.local and restart the dev server.',
       'not_configured',
     );
   }
-  return new GoogleGenAI({ apiKey });
+  return clientFor(apiKey);
 }
 
 export function modelName(): string {
@@ -769,32 +797,29 @@ const DEFAULT_TTS_MODELS = [
 ];
 
 /**
- * The speech chain to try, skipping models still in cooldown.
+ * The speech models to try, in order.
  *
- * Rendering a video speaks each scene in a separate call, so without this every
- * scene started again at a model the previous scene had just found exhausted:
- * a six-scene render spent its first attempt on a dead model six times over,
- * each one waiting out a refusal before rotating. The cooldown map is shared
- * with the text chain, and the `tts:` prefix keeps the two sets of entries
- * distinct.
- *
- * As with the text chain, an empty live set returns the whole chain: a stale
- * cooldown must never leave a render with nothing to call.
+ * Cooldowns are applied by the caller rather than here, because what runs out
+ * is a model on a particular key: the allowance is counted per project, so the
+ * same model on a second key is untouched. Filtering by model alone would have
+ * skipped a combination that still had capacity.
  */
 function ttsChain(): string[] {
   const configured = process.env.GEMINI_TTS_MODELS?.trim();
   const models = configured
     ? configured.split(',').map((m) => m.trim()).filter(Boolean)
     : DEFAULT_TTS_MODELS;
-  const all = [...new Set(models)];
-
-  const now = Date.now();
-  const live = all.filter((model) => (cooldowns.get(ttsKey(model)) ?? 0) <= now);
-  return live.length > 0 ? live : all;
+  return [...new Set(models)];
 }
 
-/** Cooldown key for a speech model, kept apart from the same name on the text chain. */
-const ttsKey = (model: string) => `tts:${model}`;
+/**
+ * Cooldown key for one speech model on one API key.
+ *
+ * Kept apart from the same model name on the text chain, and apart from the
+ * same model on another key: the allowance is per project, so one key running
+ * out says nothing about the next.
+ */
+const ttsKey = (model: string, keyIndex = 0) => `tts:${keyIndex}:${model}`;
 
 export interface SpeechResult {
   /** Raw signed 16-bit little-endian PCM, mono. */
@@ -815,18 +840,37 @@ export interface SpeechResult {
  * words-per-minute guess.
  */
 export async function synthesizeSpeech(text: string, voice = 'Kore'): Promise<SpeechResult> {
-  const ai = client();
   const spoken = text.trim();
   if (!spoken) throw new ProviderError('Nothing to speak.', 'invalid_output');
 
-  const chain = ttsChain();
+  const keys = geminiKeys();
+  if (keys.length === 0) {
+    throw new ProviderError(
+      'This step needs a Gemini key. Add GEMINI_API_KEY to .env.local and restart the dev server.',
+      'not_configured',
+    );
+  }
+
+  // Every combination of key and model is a separate allowance, because the
+  // quota is counted per project per model per day. Ordered model-major so the
+  // preferred voice is exhausted across all keys before dropping to the next
+  // model, rather than abandoning a good model at the first refusal.
+  const models = ttsChain();
+  const attempts = models.flatMap((model) =>
+    keys.map((apiKey, keyIndex) => ({ model, apiKey, keyIndex })),
+  );
+
+  const now = Date.now();
+  const live = attempts.filter((a) => (cooldowns.get(ttsKey(a.model, a.keyIndex)) ?? 0) <= now);
+  // A stale cooldown must never leave a render with nothing to call.
+  const chain = live.length > 0 ? live : attempts;
+
   let lastError: ProviderError | undefined;
 
-  for (let attempt = 0; attempt < Math.max(chain.length * 2, 2); attempt++) {
-    const model = chain[attempt % chain.length];
+  for (const [attempt, { model, apiKey, keyIndex }] of chain.entries()) {
     try {
       const response = await withDeadline(model, (signal) =>
-        ai.models.generateContent({
+        clientFor(apiKey).models.generateContent({
           model,
           contents: spoken,
           config: {
@@ -846,7 +890,7 @@ export async function synthesizeSpeech(text: string, voice = 'Kore'): Promise<Sp
       // The mime type carries the rate, e.g. "audio/L16;codec=pcm;rate=24000".
       const sampleRate = Number(inline.mimeType?.match(/rate=(\d+)/)?.[1] ?? 24000);
 
-      cooldowns.delete(ttsKey(model));
+      cooldowns.delete(ttsKey(model, keyIndex));
       return {
         pcm,
         sampleRate,
@@ -857,18 +901,17 @@ export async function synthesizeSpeech(text: string, voice = 'Kore'): Promise<Sp
     } catch (err) {
       const error = toProviderError(err);
       const worthRetrying = TRANSIENT_CODES.has(error.code) || error.code === 'bad_model';
-      // Remember that this speech model is refusing work, so the next scene in
-      // the same render starts at one that might answer instead of spending an
-      // attempt rediscovering this.
+      // Remember that this key and model are refusing, so the next scene in
+      // the same render starts somewhere that might answer instead of spending
+      // an attempt rediscovering this.
       if (worthRetrying && !NO_COOLDOWN_CODES.has(error.code)) {
         cooldowns.set(
-          ttsKey(model),
+          ttsKey(model, keyIndex),
           Date.now() + cooldownMs(error.code, error.retryAfterMs, error.dailyQuota),
         );
       }
-      if (!worthRetrying || attempt === Math.max(chain.length * 2, 2) - 1) throw error;
+      if (!worthRetrying || attempt === chain.length - 1) throw error;
       lastError = error;
-      if ((attempt + 1) % chain.length === 0) await sleep(2000);
     }
   }
 

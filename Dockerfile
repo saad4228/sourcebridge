@@ -59,6 +59,18 @@ RUN apt-get update \
  && fc-list | grep -qi noto \
  && espeak-ng --version
 
+# A better local voice, installed separately because it must never fail the
+# build. eSpeak's own synthesis is formant-based and sounds like a machine from
+# the nineties; MBROLA voices are diphone recordings of a real speaker driven
+# by the same engine -- markedly more natural, the same negligible CPU cost,
+# and free. The packages have moved between Debian components over the years,
+# so a failure here is tolerated: the application tries the better voice, finds
+# it missing, and uses the plain one for the rest of the process.
+RUN apt-get update \
+ && (apt-get install -y --no-install-recommends mbrola mbrola-en1 \
+     || echo 'MBROLA unavailable; falling back to the plain eSpeak voice.') \
+ && rm -rf /var/lib/apt/lists/*
+
 # Render video frames at 1280 rather than 1920 by default.
 #
 # Memory, not time, is what limits a render in a container. Measured against a

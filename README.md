@@ -85,7 +85,13 @@ the local ones have no quota at all:
 | --- | --- | --- | --- |
 | Gemini | per project, per model, per day | best | `GEMINI_API_KEY` |
 | Piper | none | close to Gemini | a voice model (`PIPER_VOICE`) |
-| eSpeak NG | none | synthetic but clear | `espeak-ng` — in the Docker image |
+| eSpeak NG + MBROLA | none | diphone, noticeably more natural | `mbrola-en1` — in the Docker image |
+| eSpeak NG alone | none | synthetic but clear | `espeak-ng` — in the Docker image |
+
+**To get more of the good voice, add more keys.** The allowance is per *project*, so a second key
+on the same Google project buys nothing while a key from another account is a separate allowance
+entirely. `GEMINI_API_KEYS` takes a comma-separated list and the chain walks every combination of
+key and model before falling back — six teammates with one free key each is six times the narration.
 
 The default is `auto`: the cloud voice while it lasts, then a local one. **Running out changes the
 voice rather than ending the render**, which is the same rule the text chain already follows. Set
@@ -117,7 +123,7 @@ that was actually produced.
 | --- | --- |
 | `npm run dev` | Development server on :3000 |
 | `npm run build` / `npm start` | Production build and serve |
-| `npm test` | **369 tests**, no API key required |
+| `npm test` | **379 tests**, no API key required |
 | `npm run test:watch` | Tests in watch mode |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
@@ -224,7 +230,7 @@ both is why one exhausted provider does not stop the application.
 ## Testing
 
 ```bash
-npm test          # 369 tests, no API key required
+npm test          # 379 tests, no API key required
 ```
 
 Covering extraction, schema validation, evidence resolution, meaning drift, the provenance chain,
@@ -287,7 +293,7 @@ Four settings decide whether it holds up, and all four are free:
 | Set this | Why |
 | --- | --- |
 | `GROQ_API_KEY` | **The one that matters most.** Groq meters per *minute* and resets constantly; Gemini meters per *day*. Ten people generating all seven formats is ~80 calls — comfortable on Groq, fatal on Gemini alone. The chain tries Groq first, but only if the key is on the server. |
-| `VIDEO_TTS_ENGINE=local` | Narration from the local engine: no quota, and measured at 4.6s for a six-scene video against ~30s via the cloud. |
+| `GEMINI_API_KEYS` | Extra keys from other Google accounts. The only way to get more of the good voice: the allowance is per project, so a teammate's key is a separate one. |
 | `VIDEO_RENDERS_PER_HOUR` | Per visitor, so one person cannot take everyone's capacity. Raise or disable it once speech is local. |
 | `VIDEO_RENDER_CONCURRENCY` | How many render *at once*. Several together exhaust a small instance and the platform kills the container, which fails every request in flight. |
 
@@ -337,7 +343,7 @@ lib/export/     pptx · svg · video · bundle · deckTheme   (deterministic ren
 components/     Landing · Workspace · SourcePanel · ConfigPanel · OutputPanel
 samples/        synthetic source documents
 scripts/        smoke test, renderers, PDF builder
-tests/          369 tests
+tests/          379 tests
 docs/           ARCHITECTURE.md (2 pages) + PDF
 ```
 

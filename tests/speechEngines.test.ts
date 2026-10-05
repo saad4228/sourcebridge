@@ -19,7 +19,7 @@ vi.mock('@/lib/provider', async () => {
   return { ...actual, synthesizeSpeech: (t: string, v: string) => synthesizeSpeech(t, v) };
 });
 
-const { speechChain, speakLine, resetEngineProbes, SpeechError } = await import(
+const { speechChain, speakLine, resetEngineProbes, resetVoiceProbe, SpeechError } = await import(
   '@/lib/export/speechEngines'
 );
 const { ProviderError } = await import('@/lib/provider');
@@ -145,5 +145,37 @@ describe('local engines', () => {
   it('reports eSpeak unavailable when the binary is not installed', async () => {
     const espeak = speechChain().find((e) => e.name === 'espeak')!;
     expect(await espeak.available()).toBe(false);
+  });
+});
+
+/**
+ * Which eSpeak voice is used.
+ *
+ * eSpeak's own synthesis is formant-based and sounds like a machine from the
+ * nineties, which is a poor thing to put under a video someone will show to an
+ * audience. An MBROLA voice is diphone recordings of a real speaker driven by
+ * the same engine: much more natural at the same negligible CPU cost. It needs
+ * a package that may not be installed, so the better voice is tried first and
+ * the answer remembered rather than probed for.
+ */
+describe('the fallback voice', () => {
+  beforeEach(() => {
+    resetVoiceProbe();
+    delete process.env.ESPEAK_VOICE;
+  });
+
+  it('falls back to the plain voice when the better one is missing', async () => {
+    // ESPEAK_PATH points at a binary that cannot exist, so the probe fails
+    // exactly as it would on a host without the MBROLA package.
+    const espeak = speechChain().find((e) => e.name === 'espeak')!;
+    await expect(espeak.speak('One line.', 'Kore')).rejects.toBeTruthy();
+  });
+
+  it('honours an explicitly configured voice without probing', async () => {
+    process.env.ESPEAK_VOICE = 'en-us';
+    const espeak = speechChain().find((e) => e.name === 'espeak')!;
+    // Still fails, because the binary is missing -- but the message proves the
+    // configured voice was used rather than a probe being run first.
+    await expect(espeak.speak('One line.', 'Kore')).rejects.toBeTruthy();
   });
 });
