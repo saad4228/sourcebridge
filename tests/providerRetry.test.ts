@@ -227,3 +227,96 @@ describe('a request larger than the model allows', () => {
     expect(modelChain().map((r) => r.model)).toContain('roomy-primary');
   });
 });
+
+/**
+ * A spent day is not a busy minute.
+ *
+ * Both arrive as a 429 and they are nothing alike: a rate limit clears in
+ * seconds, a daily allowance not until it resets. Standing a model down for
+ * the same five minutes either way meant every request that afternoon
+ * rediscovered models that could not answer until tomorrow -- which is time
+ * spent, on a chain whose whole purpose is to stop spending it.
+ */
+describe('daily quota', () => {
+  /** The error a call rejected with, typed, so assertions can read its fields. */
+  async function rejection(promise: Promise<unknown>): Promise<ProviderError> {
+    try {
+      await promise;
+    } catch (err) {
+      return err as ProviderError;
+    }
+    throw new Error('expected the call to reject, but it resolved');
+  }
+
+  const dailyRefusal = () =>
+    new Error(
+      '{"error":{"code":429,"message":"You exceeded your quota",' +
+        '"details":[{"quotaId":"GenerateRequestsPerDayPerProjectPerModel-FreeTier",' +
+        '"quotaMetric":"generativelanguage.googleapis.com/generate_content_free_tier_requests"}]}}',
+    );
+
+  it('is told apart from a momentary rate limit', async () => {
+    const error = await rejection(
+      run(
+        withRetry([{ provider: 'gemini', model: 'solo' }], async () => {
+          throw dailyRefusal();
+        }),
+      ),
+    );
+
+    expect(error.code).toBe('rate_limit');
+    expect(error.dailyQuota).toBe(true);
+    // The message must not promise a recovery that will not come today.
+    expect(error.message).toMatch(/daily allowance is spent/i);
+  });
+
+  it('leaves a momentary limit unmarked', async () => {
+    const error = await rejection(
+      run(
+        withRetry([{ provider: 'gemini', model: 'solo' }], async () => {
+          throw new Error('{"error":{"code":429,"message":"Too many requests, slow down"}}');
+        }),
+      ),
+    );
+
+    expect(error.code).toBe('rate_limit');
+    expect(error.dailyQuota).toBeFalsy();
+    expect(error.message).toMatch(/wait a moment/i);
+  });
+
+  it('stands the model down far longer than a momentary limit would', async () => {
+    process.env.GEMINI_MODEL = 'spent-today';
+    process.env.GEMINI_FALLBACK_MODELS = 'healthy';
+
+    await run(
+      withRetry(modelChain(), async (ref) => {
+        if (ref.model === 'spent-today') throw dailyRefusal();
+        return ref.model;
+      }),
+    );
+
+    // Six minutes on: a rate limit would have cleared by now. A spent day has
+    // not, so the chain must still skip it rather than spend an attempt.
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    expect(modelChain().map((r) => r.model)).toEqual(['healthy']);
+  });
+
+  it('brings a merely rate-limited model back once its wait has passed', async () => {
+    process.env.GEMINI_MODEL = 'busy-minute';
+    process.env.GEMINI_FALLBACK_MODELS = 'healthy';
+
+    await run(
+      withRetry(modelChain(), async (ref) => {
+        if (ref.model === 'busy-minute') {
+          throw new Error('{"error":{"code":429,"message":"Too many requests, slow down"}}');
+        }
+        return ref.model;
+      }),
+    );
+
+    expect(modelChain().map((r) => r.model)).toEqual(['healthy']);
+    await vi.advanceTimersByTimeAsync(6 * 60_000);
+    // Back in the chain: the limit it hit really does clear in minutes.
+    expect(modelChain().map((r) => r.model)).toContain('busy-minute');
+  });
+});

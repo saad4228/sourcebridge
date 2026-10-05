@@ -1,0 +1,66 @@
+# Keeps the deployed site from going to sleep.
+#
+# Free hosting tiers stop a container after about fifteen minutes of no
+# traffic, and the next visitor pays for the cold start: thirty to sixty
+# seconds before the first byte, which some platforms cut off entirely. From
+# the outside that is indistinguishable from a slow or broken application, and
+# it is the first thing anyone opening the link would see.
+#
+# So the site is asked for a cheap page periodically. The path matters: plain
+# /api/health reports process liveness and makes no model call, while
+# /api/health?deep=1 performs a real one. Pinging the deep check every ten
+# minutes would spend an entire day's free allowance on an idle site.
+#
+# Set the repository variable SITE_URL to the deployment's base URL to turn
+# this on (Settings -> Secrets and variables -> Actions -> Variables). Without
+# it the job exits quietly, so a fork or a clone does not fail CI.
+name: Keep warm
+
+on:
+  schedule:
+    # Every ten minutes, inside the fifteen-minute idle window the free tiers
+    # generally use. GitHub runs scheduled jobs on a best-effort basis and can
+    # delay them under load, which is why this is not cut any finer.
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+# A warm-up that piles up behind a delayed run is worse than a skipped one.
+concurrency:
+  group: keep-warm
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wake the site
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+        run: |
+          if [ -z "$SITE_URL" ]; then
+            echo "SITE_URL is not set, so there is nothing to keep warm."
+            echo "Set it under Settings > Secrets and variables > Actions > Variables."
+            exit 0
+          fi
+
+          # Deliberately NOT ?deep=1: that one costs a model call.
+          url="${SITE_URL%/}/api/health"
+          echo "Pinging $url"
+
+          # A cold start is the thing being prevented, so the first request may
+          # legitimately take most of a minute. Retry rather than fail: a
+          # missed warm-up is not worth a failure notification.
+          for attempt in 1 2 3; do
+            code=$(curl -sS -o /tmp/body -w '%{http_code}' --max-time 90 "$url" || echo 000)
+            if [ "$code" = "200" ]; then
+              echo "awake (HTTP $code)"
+              cat /tmp/body
+              exit 0
+            fi
+            echo "attempt $attempt returned $code"
+            sleep 10
+          done
+
+          echo "Could not reach the site after three attempts."
+          echo "That may be a cold start that outlived the timeout, or the deployment may be down."
+          exit 0

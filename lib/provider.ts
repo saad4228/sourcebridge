@@ -34,6 +34,16 @@ export class ProviderError extends Error {
   /** How long the provider asked us to wait, when it said so. */
   retryAfterMs?: number;
 
+  /**
+   * True when a whole day's allowance is spent rather than a momentary limit.
+   *
+   * The two look alike in the response and are nothing alike in practice: one
+   * clears in seconds, the other not until the quota resets. Retrying the
+   * second on the first's schedule is how a chain spends its afternoon
+   * rediscovering models that cannot answer until tomorrow.
+   */
+  dailyQuota?: boolean;
+
   constructor(
     message: string,
     readonly code:
@@ -203,11 +213,27 @@ function configuredChain(): ModelRef[] {
  */
 const cooldowns = new Map<string, number>();
 
-/** How long to skip a model after it reports overload or exhausted quota. */
-const COOLDOWN_MS = { unavailable: 60_000, rate_limit: 5 * 60_000, bad_model: 60 * 60_000 } as const;
+/**
+ * How long to skip a model after it reports overload or exhausted quota.
+ *
+ * `daily_quota` is long because the allowance genuinely does not return until
+ * it resets. An hour is well short of that, and deliberately: a quota can be
+ * raised, a key replaced or a project switched without restarting the server,
+ * and an over-long cooldown would hide the recovery.
+ */
+const COOLDOWN_MS = {
+  unavailable: 60_000,
+  rate_limit: 5 * 60_000,
+  daily_quota: 60 * 60_000,
+  bad_model: 60 * 60_000,
+} as const;
 
 /** How long a model that reported `code` should be stood down for. */
-function cooldownMs(code: string, statedMs?: number): number {
+function cooldownMs(code: string, statedMs?: number, dailyQuota = false): number {
+  // A spent day outranks a stated wait: a provider that says "retry in 8
+  // seconds" while reporting a daily quota is describing its rate limiter,
+  // not the allowance that actually ran out.
+  if (dailyQuota) return COOLDOWN_MS.daily_quota;
   // A provider that names its own wait knows better than any default. Groq's
   // limits clear in seconds, and standing its models down for the default
   // five minutes gave the rest of a run to the slow provider for no reason.
@@ -217,8 +243,8 @@ function cooldownMs(code: string, statedMs?: number): number {
   return COOLDOWN_MS.unavailable;
 }
 
-function markUnavailable(ref: ModelRef, code: string, statedMs?: number) {
-  cooldowns.set(refKey(ref), Date.now() + cooldownMs(code, statedMs));
+function markUnavailable(ref: ModelRef, code: string, statedMs?: number, dailyQuota = false) {
+  cooldowns.set(refKey(ref), Date.now() + cooldownMs(code, statedMs, dailyQuota));
 }
 
 function markAvailable(ref: ModelRef) {
@@ -348,7 +374,7 @@ function toProviderError(err: unknown): ProviderError {
     const daily = lower.includes('perday') || lower.includes('per day') || lower.includes('freetier');
     // Say which it is: a momentary rate limit clears in seconds, a spent daily
     // allowance does not clear today at all, and "retry shortly" would be a lie.
-    return new ProviderError(
+    const error = new ProviderError(
       daily
         ? "This model's free-tier daily allowance is spent. Other models are tried automatically; " +
           'once every one is spent, generation resumes when the allowance resets (about 24 hours).'
@@ -356,6 +382,12 @@ function toProviderError(err: unknown): ProviderError {
       'rate_limit',
       true,
     );
+    // A spent DAY is not a busy minute, and standing the model down for the
+    // same five minutes meant every request after that rediscovered it: the
+    // allowance resets tomorrow, so asking again this afternoon only spends
+    // time. Marked so the cooldown can be proportionate.
+    error.dailyQuota = daily;
+    return error;
   }
   if (lower.includes('timeout') || lower.includes('deadline')) {
     return new ProviderError('The AI provider timed out. Retry this format.', 'timeout', true);
@@ -541,7 +573,7 @@ export async function withRetry<T>(
       const worthRetrying = TRANSIENT_CODES.has(error.code) || error.code === 'bad_model';
       if (worthRetrying && !NO_COOLDOWN_CODES.has(error.code)) {
         // Remember this model is refusing work, so other formats skip it.
-        markUnavailable(ref, error.code, error.retryAfterMs);
+        markUnavailable(ref, error.code, error.retryAfterMs, error.dailyQuota);
       }
       attempt++;
       index++;
@@ -829,7 +861,10 @@ export async function synthesizeSpeech(text: string, voice = 'Kore'): Promise<Sp
       // the same render starts at one that might answer instead of spending an
       // attempt rediscovering this.
       if (worthRetrying && !NO_COOLDOWN_CODES.has(error.code)) {
-        cooldowns.set(ttsKey(model), Date.now() + cooldownMs(error.code, error.retryAfterMs));
+        cooldowns.set(
+          ttsKey(model),
+          Date.now() + cooldownMs(error.code, error.retryAfterMs, error.dailyQuota),
+        );
       }
       if (!worthRetrying || attempt === Math.max(chain.length * 2, 2) - 1) throw error;
       lastError = error;

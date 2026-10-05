@@ -122,3 +122,88 @@ export function retryMessage(resetAt: number): string {
   const minutes = Math.max(1, Math.ceil((resetAt - Date.now()) / 60_000));
   return minutes === 1 ? 'Try again in about a minute.' : `Try again in about ${minutes} minutes.`;
 }
+
+// ---------------------------------------------------------------------------
+// Simultaneous renders
+// ---------------------------------------------------------------------------
+
+/**
+ * How many videos may render at the same moment, and how many may wait.
+ *
+ * The per-caller limit above stops one visitor taking a day's capacity. It
+ * does nothing about ten visitors arriving at once, which is a different
+ * problem with a different failure: rendering rasterises full frames and holds
+ * the audio for every scene, so several at once on a small instance exhausts
+ * its memory and the platform kills the container. An out-of-memory kill looks
+ * exactly like a slow render that then errors, which is the least diagnosable
+ * failure there is.
+ *
+ * So renders queue instead of running together. A render takes seconds, so
+ * waiting a turn costs little; waiting behind a long queue does not, which is
+ * why the queue has a depth and a caller beyond it is turned away promptly
+ * rather than left holding a request that will time out anyway.
+ */
+function renderSlots(): number {
+  const configured = Number(process.env.VIDEO_RENDER_CONCURRENCY);
+  if (Number.isFinite(configured) && configured >= 1) return Math.min(Math.round(configured), 8);
+  return 2;
+}
+
+function maxQueued(): number {
+  const configured = Number(process.env.VIDEO_RENDER_QUEUE);
+  if (Number.isFinite(configured) && configured >= 0) return Math.min(Math.round(configured), 50);
+  return 6;
+}
+
+let active = 0;
+const waiting: (() => void)[] = [];
+
+export class RenderBusyError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RenderBusyError';
+  }
+}
+
+/**
+ * Take a render slot, waiting for one if the queue has room.
+ *
+ * Returns the function that gives the slot back. The caller must call it in a
+ * `finally`, or a failed render would hold a slot for the life of the process.
+ */
+export async function acquireRenderSlot(): Promise<() => void> {
+  if (active >= renderSlots() && waiting.length >= maxQueued()) {
+    throw new RenderBusyError(
+      'Several videos are already rendering. This keeps the server from running out of memory ' +
+        'and failing all of them. Wait a few seconds and try again — every other format, and the ' +
+        'video package (.zip), are unaffected.',
+    );
+  }
+
+  if (active >= renderSlots()) {
+    await new Promise<void>((resolve) => waiting.push(resolve));
+  }
+
+  active += 1;
+  let released = false;
+
+  return () => {
+    // Guarded: releasing twice would let more renders run than there are
+    // slots, which is precisely the condition this exists to prevent.
+    if (released) return;
+    released = true;
+    active -= 1;
+    waiting.shift()?.();
+  };
+}
+
+/** Current occupancy, for tests and for reporting. */
+export function renderLoad(): { active: number; waiting: number; slots: number } {
+  return { active, waiting: waiting.length, slots: renderSlots() };
+}
+
+/** Visible to tests so each starts from an idle server. */
+export function resetRenderSlots(): void {
+  active = 0;
+  waiting.length = 0;
+}

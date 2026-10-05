@@ -117,7 +117,7 @@ that was actually produced.
 | --- | --- |
 | `npm run dev` | Development server on :3000 |
 | `npm run build` / `npm start` | Production build and serve |
-| `npm test` | **350 tests**, no API key required |
+| `npm test` | **369 tests**, no API key required |
 | `npm run test:watch` | Tests in watch mode |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm run lint` | ESLint |
@@ -224,7 +224,7 @@ both is why one exhausted provider does not stop the application.
 ## Testing
 
 ```bash
-npm test          # 350 tests, no API key required
+npm test          # 369 tests, no API key required
 ```
 
 Covering extraction, schema validation, evidence resolution, meaning drift, the provenance chain,
@@ -279,9 +279,27 @@ about the design.
 
 Set `PORT` if the host requires a specific one — the image reads it, and binds `0.0.0.0` already.
 
+### Setting it up for a crowd
+
+A demo where several people use the site at once fails differently from one person using it a lot.
+Four settings decide whether it holds up, and all four are free:
+
+| Set this | Why |
+| --- | --- |
+| `GROQ_API_KEY` | **The one that matters most.** Groq meters per *minute* and resets constantly; Gemini meters per *day*. Ten people generating all seven formats is ~80 calls — comfortable on Groq, fatal on Gemini alone. The chain tries Groq first, but only if the key is on the server. |
+| `VIDEO_TTS_ENGINE=local` | Narration from the local engine: no quota, and measured at 4.6s for a six-scene video against ~30s via the cloud. |
+| `VIDEO_RENDERS_PER_HOUR` | Per visitor, so one person cannot take everyone's capacity. Raise or disable it once speech is local. |
+| `VIDEO_RENDER_CONCURRENCY` | How many render *at once*. Several together exhaust a small instance and the platform kills the container, which fails every request in flight. |
+
+**Free tiers sleep after about fifteen minutes idle**, and the next visitor then waits 30–60s for a
+cold start — which is indistinguishable from a broken site, and is what the first person opening
+your link would see. [`.github/workflows/keep-warm.yml`](.github/workflows/keep-warm.yml) pings the
+site every ten minutes to prevent it; set the repository variable `SITE_URL` to switch it on. It
+deliberately calls `/api/health` and not `?deep=1`, because the deep check costs a model call.
+
 > **A public URL exposes your quota.** There are no accounts, so anyone with the link can generate
-> and spend your free-tier allowance. For a demo, keep the URL unlisted rather than indexed. If it
-> needs to be public for longer, add rate limiting by IP first.
+> and spend your free-tier allowance. Rendering is limited per visitor and overall; text generation
+> is not. For a demo, keep the URL unlisted rather than indexed.
 
 ---
 
@@ -319,7 +337,7 @@ lib/export/     pptx · svg · video · bundle · deckTheme   (deterministic ren
 components/     Landing · Workspace · SourcePanel · ConfigPanel · OutputPanel
 samples/        synthetic source documents
 scripts/        smoke test, renderers, PDF builder
-tests/          350 tests
+tests/          369 tests
 docs/           ARCHITECTURE.md (2 pages) + PDF
 ```
 

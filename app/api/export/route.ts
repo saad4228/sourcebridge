@@ -8,7 +8,15 @@ import { provenanceFooter, renderMarkdown } from '@/lib/export/markdown';
 import { renderBundle } from '@/lib/export/bundle';
 import { MAX_SCENES, VideoRenderError, renderVideo } from '@/lib/export/video';
 import { beginJob, isRenderId, recordProgress, updateJob } from '@/lib/export/renderJobs';
-import { callerKey, consume, refund, retryMessage, videoRenderLimit } from '@/lib/rateLimit';
+import {
+  acquireRenderSlot,
+  callerKey,
+  consume,
+  refund,
+  RenderBusyError,
+  retryMessage,
+  videoRenderLimit,
+} from '@/lib/rateLimit';
 import { SpeechError } from '@/lib/export/speechEngines';
 import { ProviderError } from '@/lib/provider';
 import { briefWireSchema } from '@/lib/wire';
@@ -217,6 +225,15 @@ export async function POST(request: Request) {
         const scenes = (content as VideoPackage).scenes?.length ?? 0;
         if (renderId) beginJob(renderId, Math.min(scenes, MAX_SCENES));
 
+        // Several renders at once exhaust a small instance's memory, and the
+        // platform then kills the container -- which fails every request in
+        // flight, not just the ones that were queued. Waiting a turn costs
+        // seconds; an out-of-memory kill costs everything.
+        if (renderId) {
+          updateJob(renderId, { stage: 'queued', message: 'Waiting for a render slot' });
+        }
+        const release = await acquireRenderSlot();
+
         try {
           const rendered = await renderVideo(content as VideoPackage, {
             sourceTitle,
@@ -264,6 +281,8 @@ export async function POST(request: Request) {
           // misconfiguration locks someone out for the rest of the hour.
           if (quota) refund(caller);
           throw err;
+        } finally {
+          release();
         }
       }
 
@@ -300,6 +319,15 @@ export async function POST(request: Request) {
     // offers none at all, which is a setup gap rather than a fault, and the
     // message already names what to install; 'failed' means they were there
     // and refused, which is upstream.
+    // The server is already rendering as much as it can hold. Not a fault, and
+    // not the caller's: they should simply come back in a moment.
+    if (err instanceof RenderBusyError) {
+      return NextResponse.json(
+        { error: err.message, kind: 'busy' },
+        { status: 503, headers: { 'Retry-After': '15' } },
+      );
+    }
+
     if (err instanceof SpeechError) {
       return NextResponse.json(
         { error: err.message, kind: 'speech', code: err.kind },

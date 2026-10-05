@@ -9,10 +9,14 @@
 
 import { describe, expect, it, beforeEach, afterEach } from 'vitest';
 import {
+  acquireRenderSlot,
   callerKey,
   consume,
   refund,
+  RenderBusyError,
+  renderLoad,
   resetRateLimits,
+  resetRenderSlots,
   retryMessage,
   videoRenderLimit,
 } from '@/lib/rateLimit';
@@ -146,5 +150,114 @@ describe('what the caller is told', () => {
 
   it('never reports a wait of zero', () => {
     expect(retryMessage(Date.now() - 1000)).toMatch(/about a minute/);
+  });
+});
+
+/**
+ * Simultaneous renders.
+ *
+ * The per-caller limit stops one visitor taking a day's capacity. This is the
+ * other failure: ten visitors arriving at once. Rendering holds full frames
+ * and the audio for every scene, so several together exhaust a small instance
+ * and the platform kills the container -- which fails every request in flight,
+ * not only the ones that were queued.
+ */
+describe('render slots', () => {
+  beforeEach(() => {
+    resetRenderSlots();
+    delete process.env.VIDEO_RENDER_CONCURRENCY;
+    delete process.env.VIDEO_RENDER_QUEUE;
+  });
+
+  it('runs a couple at once by default, not all of them', () => {
+    expect(renderLoad().slots).toBe(2);
+  });
+
+  it('lets the configured number start immediately', async () => {
+    process.env.VIDEO_RENDER_CONCURRENCY = '2';
+    const a = await acquireRenderSlot();
+    const b = await acquireRenderSlot();
+
+    expect(renderLoad().active).toBe(2);
+    a();
+    b();
+    expect(renderLoad().active).toBe(0);
+  });
+
+  it('makes the next render wait rather than run alongside', async () => {
+    process.env.VIDEO_RENDER_CONCURRENCY = '1';
+    const first = await acquireRenderSlot();
+
+    let started = false;
+    const second = acquireRenderSlot().then((release) => {
+      started = true;
+      return release;
+    });
+
+    // Still waiting: the slot is taken.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(started).toBe(false);
+    expect(renderLoad().waiting).toBe(1);
+
+    first();
+    (await second)();
+    expect(started).toBe(true);
+    expect(renderLoad().active).toBe(0);
+  });
+
+  it('turns a caller away once the queue is full, instead of holding them', async () => {
+    process.env.VIDEO_RENDER_CONCURRENCY = '1';
+    process.env.VIDEO_RENDER_QUEUE = '1';
+
+    const held = await acquireRenderSlot();
+    const queued = acquireRenderSlot();
+
+    // One running, one waiting, no room for a third.
+    await new Promise((r) => setTimeout(r, 20));
+    await expect(acquireRenderSlot()).rejects.toBeInstanceOf(RenderBusyError);
+    await expect(acquireRenderSlot()).rejects.toThrow(/running out of memory/i);
+    // The refusal must point at what still works.
+    await expect(acquireRenderSlot()).rejects.toThrow(/video package/i);
+
+    held();
+    (await queued)();
+  });
+
+  it('hands the slot to whoever has waited longest', async () => {
+    process.env.VIDEO_RENDER_CONCURRENCY = '1';
+    const held = await acquireRenderSlot();
+
+    const order: number[] = [];
+    const first = acquireRenderSlot().then((r) => { order.push(1); return r; });
+    await new Promise((r) => setTimeout(r, 5));
+    const second = acquireRenderSlot().then((r) => { order.push(2); return r; });
+
+    held();
+    (await first)();
+    (await second)();
+    expect(order).toEqual([1, 2]);
+  });
+
+  it('ignores a double release, which would overrun the slots', async () => {
+    process.env.VIDEO_RENDER_CONCURRENCY = '1';
+    const release = await acquireRenderSlot();
+
+    release();
+    release();
+    // Releasing twice must not create capacity that does not exist.
+    expect(renderLoad().active).toBe(0);
+  });
+
+  it('frees the slot even when the render threw', async () => {
+    process.env.VIDEO_RENDER_CONCURRENCY = '1';
+    const release = await acquireRenderSlot();
+    try {
+      throw new Error('render failed');
+    } catch {
+      release();
+    }
+    expect(renderLoad().active).toBe(0);
+    // The next render can start rather than queueing behind a leaked slot.
+    (await acquireRenderSlot())();
   });
 });
